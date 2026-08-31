@@ -110,9 +110,11 @@ header{display:flex;align-items:center;gap:10px;padding:8px 12px;min-width:0;
 table{width:100%;border-collapse:collapse;table-layout:fixed}
 thead th{position:sticky;top:0;background:#11151b;z-index:2;text-align:left;
   padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
-  color:var(--dim);border-bottom:1px solid var(--line);cursor:pointer;user-select:none;
+  color:var(--dim);border-bottom:1px solid var(--line);cursor:default;user-select:none;
   font-weight:700;white-space:nowrap}
-thead th:hover{color:var(--tx)}
+thead th[data-s]{cursor:pointer}
+thead th[data-s]:hover{color:var(--tx);background:#161c24}
+thead th.sorted{color:var(--tx);box-shadow:inset 0 -2px 0 var(--acc)}
 tbody tr{border-bottom:1px solid #1a2029;cursor:pointer;position:relative}
 tbody tr:hover{background:#182029}
 tbody tr.sel{background:#12283f}
@@ -515,14 +517,19 @@ function renderExplorer() {
     </tr>`;
   }).join('');
   const arrow = k => S.sort===k ? (S.asc?' ▲':' ▼') : '';
+  const sc = k => S.sort===k ? ' sorted' : '';
+  // Peso, Tamaño y % carpeta son la misma magnitud: las tres ordenan por tamaño
   $('#p-explorer').innerHTML = entries.length ? `
     <table><thead><tr>
-      <th style="width:34px"></th><th data-s="name">Nombre${arrow('name')}</th>
-      <th style="width:22%">Peso</th>
-      <th data-s="size" class="n" style="width:104px">Tamaño${arrow('size')}</th>
-      <th class="n" style="width:80px">% carp.</th>
-      <th data-s="files" class="n" style="width:92px">Ficheros${arrow('files')}</th>
-      <th data-s="mtime" class="n" style="width:124px">Modificado${arrow('mtime')}</th>
+      <th style="width:34px"></th>
+      <th data-s="name" class="${sc('name').trim()}">Nombre${arrow('name')}</th>
+      <th data-s="size" class="${sc('size').trim()}" style="width:22%"
+          title="Ordena por tamaño">Peso</th>
+      <th data-s="size" class="n${sc('size')}" style="width:104px">Tamaño${arrow('size')}</th>
+      <th data-s="size" class="n${sc('size')}" style="width:80px"
+          title="Ordena por tamaño">% carp.</th>
+      <th data-s="files" class="n${sc('files')}" style="width:92px">Ficheros${arrow('files')}</th>
+      <th data-s="mtime" class="n${sc('mtime')}" style="width:124px">Modificado${arrow('mtime')}</th>
     </tr></thead><tbody>${rows}</tbody></table>
     ${entries.length > 600 ? `<div class="empty">…y ${fn(entries.length-600)} elementos más pequeños</div>` : ''}
     ` : '<div class="empty">Carpeta vacía o sin permisos de lectura.</div>';
