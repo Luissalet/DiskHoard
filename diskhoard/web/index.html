@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DiskHoard</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a21; --panel2:#1b212a; --line:#262e3a;
+  --tx:#e6edf3; --mut:#8b98a8; --dim:#5d6b7d;
+  --acc:#58a6ff; --acc2:#1f6feb;
+  --safe:#3fb950; --review:#d29922; --danger:#f85149;
+  --bar:#22405f; --bar2:#2d5c8a;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);
+  font:13px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);
+  border-radius:6px;padding:5px 11px;cursor:pointer}
+button:hover{background:#232b36;border-color:#3a4553}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--acc2);border-color:var(--acc2);color:#fff;font-weight:600}
+button.primary:hover{background:#2b7ef0}
+button.danger{background:#5b1d1a;border-color:#7a2b26;color:#ffb3ae}
+button.danger:hover{background:#75241f}
+button.ghost{background:transparent}
+input,select{font:inherit;color:inherit;background:#0b0e13;border:1px solid var(--line);
+  border-radius:6px;padding:6px 9px;outline:none}
+input:focus{border-color:var(--acc)}
+a{color:var(--acc)}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:#2b3441;border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#3b4757}
+::-webkit-scrollbar-track{background:transparent}
+
+#app{display:flex;flex-direction:column;height:100%}
+
+/* ---------- pantalla de inicio ---------- */
+#start{flex:1;overflow:auto;padding:40px 28px}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.4px}
+h1 span{color:var(--acc)}
+.sub{color:var(--mut);margin:0 0 28px}
+.sect{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);
+  margin:26px 0 10px;font-weight:700}
+.drives{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px}
+.drive{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:14px;cursor:pointer;transition:.12s}
+.drive:hover{border-color:var(--acc);background:var(--panel2);transform:translateY(-1px)}
+.drive .dl{font-weight:700;font-size:15px}
+.drive .dt{color:var(--mut);font-size:11.5px;margin-top:2px}
+.meter{height:8px;background:#0b0e13;border:1px solid var(--line);border-radius:4px;
+  margin:11px 0 6px;overflow:hidden;box-sizing:border-box}
+.meter i{display:block;height:100%}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,#2d5c8a,#58a6ff)}
+.meter.m-warn i{background:linear-gradient(90deg,#8a5a2d,#d29922)}
+.meter.m-bad i{background:linear-gradient(90deg,#8a2d2d,#f85149)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+  padding:6px 13px;cursor:pointer;font-size:12.5px}
+.chip:hover{border-color:var(--acc);color:var(--acc)}
+.pathrow{display:flex;gap:8px;margin-top:8px}
+.pathrow input{flex:1;font-family:Consolas,monospace}
+.note{color:var(--dim);font-size:12px;margin-top:10px;line-height:1.6}
+
+/* ---------- escaneando ---------- */
+#scanning{flex:1;display:none;flex-direction:column;align-items:center;
+  justify-content:center;gap:16px;padding:30px}
+.spin{width:44px;height:44px;border:3px solid #223;border-top-color:var(--acc);
+  border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.pstat{display:flex;gap:34px;font-variant-numeric:tabular-nums}
+.pstat div{text-align:center}
+.pstat b{display:block;font-size:23px;font-weight:700}
+.pstat span{color:var(--mut);font-size:11.5px}
+#pcur{color:var(--dim);font-family:Consolas,monospace;font-size:11.5px;
+  max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl}
+
+/* ---------- principal ---------- */
+#main{flex:1;display:none;flex-direction:column;min-height:0}
+header{display:flex;align-items:center;gap:10px;padding:8px 12px;min-width:0;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:800;letter-spacing:-.3px;margin-right:4px;flex:0 0 auto}
+#rootinfo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:12px;text-align:right}
+.brand span{color:var(--acc)}
+.tabs{display:flex;gap:2px;padding:0 8px;border-bottom:1px solid var(--line);
+  background:var(--panel);overflow-x:auto}
+.tab{padding:8px 13px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;
+  white-space:nowrap;font-size:12.5px}
+.tab:hover{color:var(--tx)}
+.tab.on{color:var(--tx);border-bottom-color:var(--acc);font-weight:600}
+.tab b{color:var(--dim);font-weight:400;margin-left:5px;font-size:11px}
+.crumbbar{display:flex;align-items:center;gap:10px;padding-right:12px;
+  border-bottom:1px solid var(--line);background:#11151b}
+.crumbbar #btnRescanDir{flex:0 0 auto;font-size:12px;padding:3px 9px;color:var(--mut)}
+.crumbbar #btnRescanDir:hover{color:var(--tx)}
+.crumbs{display:flex;align-items:center;gap:2px;padding:7px 12px;flex-wrap:wrap;
+  flex:1;min-width:0;font-size:12.5px}
+.crumbs a{color:var(--mut);text-decoration:none;padding:2px 6px;border-radius:5px;
+  cursor:pointer;font-family:Consolas,monospace}
+.crumbs a:hover{background:var(--panel2);color:var(--tx)}
+.crumbs a:last-child{color:var(--tx);font-weight:600}
+.crumbs i{color:var(--dim);font-style:normal}
+#body{flex:1;overflow:auto;min-height:0}
+.pane{display:none;padding:0}
+.pane.on{display:block}
+
+/* tabla */
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+thead th{position:sticky;top:0;background:#11151b;z-index:2;text-align:left;
+  padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--dim);border-bottom:1px solid var(--line);cursor:pointer;user-select:none;
+  font-weight:700;white-space:nowrap}
+thead th:hover{color:var(--tx)}
+tbody tr{border-bottom:1px solid #1a2029;cursor:pointer;position:relative}
+tbody tr:hover{background:#182029}
+tbody tr.sel{background:#12283f}
+tbody tr.sel:hover{background:#163353}
+td{padding:5px 10px;vertical-align:middle;position:relative;z-index:1;overflow:hidden}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.nm{display:flex;align-items:center;gap:7px;min-width:0}
+.nm .badge{flex:0 0 auto}
+.ic{width:15px;text-align:center;flex:0 0 15px;opacity:.75}
+.nm span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cbx{width:16px;height:16px;accent-color:var(--acc);cursor:pointer;vertical-align:middle;
+  pointer-events:none}
+td.selcell{cursor:pointer}
+td.selcell:hover{background:#22303f;box-shadow:inset 2px 0 0 var(--acc)}
+.card.sel-card{cursor:pointer}
+.card.sel-card:hover{border-color:#3d4a5a;background:var(--panel2)}
+.card.sel-card.on{border-color:var(--acc);background:#12212f}
+.card.sel-card.no{cursor:default;opacity:.75}
+.card.sel-card.no:hover{border-color:var(--line);background:var(--panel)}
+.spacer{flex:1}
+.gobtn{padding:2px 10px;font-size:11.5px;color:var(--mut)}
+.gobtn:hover{color:var(--tx);border-color:var(--acc)}
+.card .p.link{cursor:pointer}
+.card .p.link:hover{color:var(--acc);text-decoration:underline}
+.wbar{position:relative;width:100%;height:15px;background:#0b0e13;border-radius:3px;
+  overflow:hidden;min-width:60px}
+.wbar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--bar),var(--bar2))}
+.wbar.s i{background:linear-gradient(90deg,#1e5c33,#3fb950)}
+.wbar.r i{background:linear-gradient(90deg,#6b4c14,#d29922)}
+.wbar.d i{background:linear-gradient(90deg,#6b201d,#f85149)}
+.badge{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid;white-space:nowrap}
+.b-safe{color:var(--safe);border-color:#1e5c33;background:#0f2417}
+.b-review{color:var(--review);border-color:#6b4c14;background:#241d0d}
+.b-danger{color:var(--danger);border-color:#6b201d;background:#25100f}
+.mut{color:var(--mut)}
+.dim{color:var(--dim)}
+.mono{font-family:Consolas,monospace}
+
+/* tarjetas */
+.cards{padding:14px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.card.click{cursor:pointer}
+.card.click:hover{border-color:var(--acc)}
+.card h3{margin:0 0 3px;font-size:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.card .p{font-family:Consolas,monospace;font-size:11.5px;color:var(--mut);
+  word-break:break-all;margin:2px 0 7px}
+.card .why{color:var(--mut);font-size:12.5px;margin:2px 0}
+.card .how{color:var(--dim);font-size:12px;margin:2px 0 0}
+.big{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
+  padding:14px 14px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.kpi .v{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--mut);font-size:11.5px;margin-top:2px}
+.mini{height:6px;background:#0b0e13;border-radius:3px;overflow:hidden;margin-top:8px}
+.mini i{display:block;height:100%}
+
+/* treemap */
+#tm{position:relative;margin:12px;height:calc(100vh - 250px);min-height:320px;
+  background:#0b0e13;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tmb{position:absolute;border:1px solid rgba(0,0,0,.55);overflow:hidden;cursor:pointer;
+  padding:3px 5px;font-size:11px;line-height:1.25;transition:filter .1s}
+.tmb:hover{filter:brightness(1.35);z-index:5}
+.tmb .l{font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.7);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tmb .s{opacity:.85;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+
+/* barra de seleccion */
+#selbar{display:none;align-items:center;gap:10px;padding:9px 13px;background:#12283f;
+  border-top:1px solid #234; flex-wrap:wrap}
+#selbar.on{display:flex}
+#selinfo{font-weight:600}
+
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(14px);
+  background:var(--panel2);border:1px solid var(--acc);color:var(--tx);padding:9px 18px;
+  border-radius:999px;font-size:13px;box-shadow:0 8px 26px rgba(0,0,0,.5);z-index:60;
+  opacity:0;pointer-events:none;transition:.18s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* modal */
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.66);display:none;z-index:50;
+  align-items:center;justify-content:center;padding:22px}
+#ov.on{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  max-width:760px;width:100%;max-height:84vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.modal h2{margin:0;padding:15px 18px;border-bottom:1px solid var(--line);font-size:16px}
+.mbody{padding:15px 18px;overflow:auto;flex:1}
+.mfoot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:9px;
+  justify-content:flex-end;flex-wrap:wrap}
+.list{max-height:290px;overflow:auto;background:#0b0e13;border:1px solid var(--line);
+  border-radius:8px;padding:9px;font-family:Consolas,monospace;font-size:11.5px}
+.list div{padding:2px 0;display:flex;justify-content:space-between;gap:14px}
+textarea{width:100%;height:290px;background:#0b0e13;color:var(--tx);border:1px solid var(--line);
+  border-radius:8px;padding:11px;font-family:Consolas,monospace;font-size:11.5px;resize:vertical}
+.warn{background:#25100f;border:1px solid #6b201d;color:#ffb3ae;padding:10px 12px;
+  border-radius:8px;margin-bottom:12px;font-size:12.5px}
+.ok{background:#0f2417;border:1px solid #1e5c33;color:#7ee295;padding:10px 12px;
+  border-radius:8px;margin-bottom:12px;font-size:12.5px}
+.empty{padding:44px;text-align:center;color:var(--dim)}
+.rowbtns{display:flex;gap:6px;opacity:0;transition:.1s}
+tr:hover .rowbtns{opacity:1}
+.rowbtns button{padding:1px 7px;font-size:11px}
+kbd{background:#0b0e13;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+  padding:1px 5px;font-family:Consolas,monospace;font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ INICIO ============ -->
+  <section id="start"><div class="wrap">
+    <h1>Disk<span>Hoard</span></h1>
+    <p class="sub">Elige por dónde empezar. Se escanea el árbol entero y luego navegas por niveles viendo cuánto pesa cada cosa.</p>
+
+    <div class="sect">Unidades</div>
+    <div class="drives" id="drives"></div>
+
+    <div class="sect">Atajos</div>
+    <div class="chips" id="quick"></div>
+
+    <div class="sect">O una carpeta concreta</div>
+    <div class="pathrow">
+      <input id="pathin" placeholder="C:\Users\luism\Desktop" spellcheck="false">
+      <button class="primary" id="goPath">Escanear</button>
+    </div>
+    <p class="note">Un disco entero con muchos ficheros puede tardar unos minutos la primera vez.
+    Lo que Windows no deje leer se marca aparte en vez de contarlo como 0.</p>
+  </div></section>
+
+  <!-- ============ ESCANEANDO ============ -->
+  <section id="scanning">
+    <div class="spin"></div>
+    <div class="pstat">
+      <div><b id="pbytes">0</b><span>leído</span></div>
+      <div><b id="pfiles">0</b><span>ficheros</span></div>
+      <div><b id="pdirs">0</b><span>carpetas</span></div>
+      <div><b id="ptime">0s</b><span>tiempo</span></div>
+    </div>
+    <div id="pcur"></div>
+    <button id="cancelScan">Cancelar</button>
+  </section>
+
+  <!-- ============ PRINCIPAL ============ -->
+  <section id="main">
+    <header>
+      <div class="brand">Disk<span>Hoard</span></div>
+      <button id="btnUp" title="Subir un nivel (Retroceso)">↑</button>
+      <button id="btnRescan" title="Volver a escanear todo el árbol desde cero">⟳ todo</button>
+      <input id="filter" placeholder="Filtrar en esta carpeta…" style="width:200px">
+      <div style="flex:1"></div>
+      <span id="rootinfo" class="mut"></span>
+      <button id="btnNew">Cambiar punto de partida</button>
+    </header>
+
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-t="explorer">Explorador</div>
+      <div class="tab" data-t="tree">Mapa</div>
+      <div class="tab" data-t="hot">Puntos calientes <b id="nhot"></b></div>
+      <div class="tab" data-t="junk">Basura detectada <b id="njunk"></b></div>
+      <div class="tab" data-t="files">Ficheros grandes</div>
+      <div class="tab" data-t="types">Por tipo</div>
+      <div class="tab" data-t="stale">Sin tocar</div>
+    </div>
+
+    <div class="crumbbar">
+      <div class="crumbs" id="crumbs"></div>
+      <button id="btnRescanDir" class="ghost"
+        title="Vuelve a leer solo esta carpeta y actualiza los totales. Rápido.">⟳ esta carpeta</button>
+    </div>
+
+    <div id="body">
+      <div class="pane on" id="p-explorer"></div>
+      <div class="pane" id="p-tree"></div>
+      <div class="pane" id="p-hot"></div>
+      <div class="pane" id="p-junk"></div>
+      <div class="pane" id="p-files"></div>
+      <div class="pane" id="p-types"></div>
+      <div class="pane" id="p-stale"></div>
+    </div>
+
+    <div id="selbar">
+      <span id="selinfo"></span>
+      <div style="flex:1"></div>
+      <button id="bOpen">Abrir en el explorador</button>
+      <button id="bCopy">Copiar rutas</button>
+      <button id="bScript">Generar script</button>
+      <button class="danger" id="bPerm">Borrar definitivamente</button>
+      <button class="primary" id="bTrash">Mover a la papelera</button>
+      <button class="ghost" id="bClear">✕</button>
+    </div>
+  </section>
+</div>
+
+<div id="ov"><div class="modal">
+  <h2 id="mtitle"></h2>
+  <div class="mbody" id="mbody"></div>
+  <div class="mfoot" id="mfoot"></div>
+</div></div>
+<script>
+"use strict";
+const T = new URLSearchParams(location.search).get('t') || '';
+const $ = s => document.querySelector(s);
+const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
+
+async function get(p, q) {
+  const u = new URL(p, location.origin);
+  u.searchParams.set('t', T);
+  if (q) for (const k in q) u.searchParams.set(k, q[k]);
+  const r = await fetch(u); return r.json();
+}
+async function post(p, body) {
+  const r = await fetch(p + '?t=' + encodeURIComponent(T), {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {})});
+  return r.json();
+}
+
+const KB = 1024, MB = KB*1024, GB = MB*1024, TB = GB*1024;
+function fb(b) {
+  if (b === null || b === undefined) return '';
+  if (b >= TB) return (b/TB).toFixed(2).replace('.', ',') + ' TB';
+  if (b >= GB) return (b/GB).toFixed(b/GB >= 100 ? 0 : 1).replace('.', ',') + ' GB';
+  if (b >= MB) return (b/MB).toFixed(b/MB >= 100 ? 0 : 1).replace('.', ',') + ' MB';
+  if (b >= KB) return Math.round(b/KB) + ' KB';
+  return b + ' B';
+}
+function fn(n) { return (n||0).toLocaleString('es-ES'); }
+function fd(ts) {
+  if (!ts) return '';
+  const d = new Date(ts*1000);
+  return d.toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit', year:'numeric'});
+}
+function ago(ts) {
+  if (!ts) return '';
+  const days = (Date.now()/1000 - ts)/86400;
+  if (days < 1) return 'hoy';
+  if (days < 60) return 'hace ' + Math.round(days) + ' días';
+  if (days < 730) return 'hace ' + Math.round(days/30) + ' meses';
+  return 'hace ' + (days/365).toFixed(1).replace('.', ',') + ' años';
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function ftime(s) {
+  s = Math.round(s||0);
+  return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
+}
+
+const S = {root:'', path:'', dir:null, sel:new Map(), tab:'explorer',
+           sort:'size', asc:false, filter:'', loaded:{}, drives:[]};
+
+/* ================= inicio ================= */
+async function boot() {
+  const d = await get('/api/drives');
+  S.drives = d.drives;
+  $('#drives').innerHTML = d.drives.map(dr => {
+    const used = dr.total - dr.free, pct = dr.total ? used*100/dr.total : 0;
+    const cls = pct > 92 ? 'm-bad' : pct > 80 ? 'm-warn' : '';
+    return `<div class="drive" data-p="${esc(dr.path)}">
+      <div class="dl">${esc(dr.path)} <span class="dim" style="font-weight:400">${esc(dr.label)}</span></div>
+      <div class="meter ${cls}"><i style="width:${pct.toFixed(1)}%"></i></div>
+      <div class="dt">${fb(used)} usados · <b>${fb(dr.free)} libres</b> de ${fb(dr.total)}</div>
+    </div>`;
+  }).join('');
+  $('#quick').innerHTML = d.quick.map(q =>
+    `<div class="chip" data-p="${esc(q.path)}">${esc(q.label)} <span class="dim">${esc(q.path)}</span></div>`).join('');
+  $('#pathin').value = d.quick.length ? d.quick[0].path : 'C:\\';
+  $$('.drive, .chip').forEach(el => el.onclick = () => scan(el.dataset.p));
+}
+$('#goPath').onclick = () => scan($('#pathin').value.trim());
+$('#pathin').onkeydown = e => { if (e.key === 'Enter') scan($('#pathin').value.trim()); };
+
+/* ================= escaneo ================= */
+let pollTimer = null;
+async function scan(path) {
+  if (!path) return;
+  const r = await post('/api/scan', {path});
+  if (r.error) { alert(r.error); return; }
+  S.root = r.root; S.sel.clear(); S.loaded = {};
+  $('#start').style.display = 'none';
+  $('#main').style.display = 'none';
+  $('#scanning').style.display = 'flex';
+  poll();
+}
+async function poll() {
+  const p = await get('/api/progress');
+  if (p.error) { $('#scanning').style.display='none'; $('#start').style.display='block'; alert(p.error); return; }
+  $('#pbytes').textContent = fb(p.bytes);
+  $('#pfiles').textContent = fn(p.files);
+  $('#pdirs').textContent  = fn(p.dirs);
+  $('#ptime').textContent  = ftime(p.elapsed);
+  $('#pcur').textContent   = p.current || '';
+  if (p.done) {
+    $('#scanning').style.display = 'none';
+    $('#main').style.display = 'flex';
+    const dr = S.drives.find(d => S.root.toUpperCase().indexOf(d.path.toUpperCase()) === 0);
+    S.stat = fn(p.files) + ' ficheros · ' + fn(p.dirs) + ' carpetas · ' + ftime(p.elapsed) +
+      (p.errors ? ' · ' + fn(p.errors) + ' sin permiso' : '');
+    $('#rootinfo').textContent = fb(p.total) + ' · ' + S.stat;
+    go(S.back || S.root, true);
+    S.back = null;
+    warmTabs();
+    return;
+  }
+  pollTimer = setTimeout(poll, 350);
+}
+$('#cancelScan').onclick = async () => { await post('/api/cancel'); clearTimeout(pollTimer);
+  $('#scanning').style.display='none'; $('#start').style.display='block'; };
+
+async function warmTabs() {
+  const j = await get('/api/junk');
+  if (j.items) { S.loaded.junk = j; $('#njunk').textContent = fb(j.reclaimable + j.review); }
+  const h = await get('/api/hotspots');
+  if (h.items) { S.loaded.hot = h; $('#nhot').textContent = h.items.length; }
+}
+
+/* ================= navegación ================= */
+function showTab(name) {
+  S.tab = name;
+  $$('.tab').forEach(x => x.classList.toggle('on', x.dataset.t === name));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.id === 'p-' + name));
+}
+// ir a una carpeta desde cualquier pestaña: salta al explorador
+function goto(path) { showTab('explorer'); return go(path); }
+
+async function go(path, quiet) {
+  const d = await get('/api/dir', {path});
+  if (d.error) {
+    if (quiet) { if (path !== S.root) return go(S.root); return; }
+    alert(d.error); return;
+  }
+  S.dir = d; S.path = d.path;
+  $('#crumbs').innerHTML = d.crumbs.map((c,i) =>
+    (i ? '<i>›</i>' : '') + `<a data-p="${esc(c.path)}">${esc(c.name)}</a>`).join('');
+  $$('#crumbs a').forEach(a => a.onclick = () => go(a.dataset.p));
+  $('#btnUp').disabled = !d.parent;
+  if (S.stat) $('#rootinfo').textContent = fb(d.root_size) + ' · ' + S.stat;
+  renderExplorer();
+  if (S.tab === 'tree') renderTree();
+}
+$('#btnUp').onclick = () => { if (S.dir && S.dir.parent) go(S.dir.parent); };
+$('#btnRescan').onclick = () => { S.back = S.path; scan(S.root); };
+$('#btnRescanDir').onclick = async () => {
+  const b = $('#btnRescanDir'), path = S.path, txt = b.textContent;
+  b.disabled = true; b.textContent = 'Re-escaneando…';
+  const r = await post('/api/rescan', {path});
+  b.disabled = false; b.textContent = txt;
+  if (r.error) { alert(r.error); return; }
+  S.loaded = {};
+  if (r.gone) { toast('Esa carpeta ya no existe'); return go(S.dir.parent || S.root, true); }
+  await go(path, true);
+  toast(r.delta === 0 ? 'Sin cambios en esta carpeta'
+        : (r.delta < 0 ? 'Han desaparecido ' + fb(-r.delta) : 'Han aparecido ' + fb(r.delta)));
+  warmTabs();
+};
+function toast(msg) {
+  let t = $('#toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 3200);
+}
+$('#btnNew').onclick = () => { $('#main').style.display='none'; $('#start').style.display='block'; };
+$('#filter').oninput = e => { S.filter = e.target.value.toLowerCase(); renderExplorer(); };
+
+function sorted(entries) {
+  const k = S.sort, a = S.asc ? 1 : -1;
+  const arr = entries.slice();
+  arr.sort((x,y) => {
+    if (k === 'name') return a * x.name.localeCompare(y.name, 'es');
+    if (k === 'mtime') return a * ((x.mtime||0) - (y.mtime||0));
+    if (k === 'files') return a * ((x.files||0) - (y.files||0));
+    return a * (x.size - y.size);
+  });
+  return arr;
+}
+
+function renderExplorer() {
+  const d = S.dir; if (!d) return;
+  let entries = d.entries;
+  if (S.filter) entries = entries.filter(e => e.name.toLowerCase().indexOf(S.filter) >= 0);
+  entries = sorted(entries);
+  const max = entries.length ? Math.max.apply(null, entries.map(e => e.size)) || 1 : 1;
+  const shown = entries.slice(0, 600);
+  const rows = shown.map(e => {
+    const pct = d.size ? e.size*100/d.size : 0;
+    const w = e.size*100/max;
+    const sf = e.tag ? e.tag.safety : '';
+    const bc = sf === 'safe' ? 's' : sf === 'review' ? 'r' : sf === 'danger' ? 'd' : '';
+    const ic = e.link ? '🔗' : e.err ? '🔒' : e.dir ? '📁' : '📄';
+    return `<tr data-p="${esc(e.path)}" data-d="${e.dir?1:0}" class="${S.sel.has(e.path)?'sel':''}">
+      <td class="selcell" title="Seleccionar"><input type="checkbox" class="cbx" ${S.sel.has(e.path)?'checked':''}></td>
+      <td><div class="nm"><span class="ic">${ic}</span><span class="t">${esc(e.name)}</span>
+        ${e.tag ? `<span class="badge b-${e.tag.safety}" title="${esc(e.tag.why)}">${esc(e.tag.label)}</span>` : ''}
+        ${e.err ? '<span class="badge b-danger">sin permiso</span>' : ''}
+        ${e.link ? '<span class="badge b-review">enlace</span>' : ''}</div></td>
+      <td><div class="wbar ${bc}"><i style="width:${w.toFixed(2)}%"></i></div></td>
+      <td class="n"><b>${fb(e.size)}</b></td>
+      <td class="n mut">${pct.toFixed(1)}%</td>
+      <td class="n mut">${e.dir?fn(e.files):''}</td>
+      <td class="n dim" title="${fd(e.mtime)}">${ago(e.mtime)}</td>
+    </tr>`;
+  }).join('');
+  const arrow = k => S.sort===k ? (S.asc?' ▲':' ▼') : '';
+  $('#p-explorer').innerHTML = entries.length ? `
+    <table><thead><tr>
+      <th style="width:34px"></th><th data-s="name">Nombre${arrow('name')}</th>
+      <th style="width:22%">Peso</th>
+      <th data-s="size" class="n" style="width:104px">Tamaño${arrow('size')}</th>
+      <th class="n" style="width:80px">% carp.</th>
+      <th data-s="files" class="n" style="width:92px">Ficheros${arrow('files')}</th>
+      <th data-s="mtime" class="n" style="width:124px">Modificado${arrow('mtime')}</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    ${entries.length > 600 ? `<div class="empty">…y ${fn(entries.length-600)} elementos más pequeños</div>` : ''}
+    ` : '<div class="empty">Carpeta vacía o sin permisos de lectura.</div>';
+
+  $$('#p-explorer thead th[data-s]').forEach(th => th.onclick = () => {
+    const k = th.dataset.s;
+    if (S.sort === k) S.asc = !S.asc; else { S.sort = k; S.asc = (k === 'name'); }
+    renderExplorer();
+  });
+  $$('#p-explorer tbody tr').forEach(tr => {
+    const p = tr.dataset.p, isdir = tr.dataset.d === '1';
+    const ent = entries.find(e => e.path === p);
+    tr.querySelector('.selcell').onclick = ev => { ev.stopPropagation(); toggleSel(ent); };
+    tr.onclick = () => { if (isdir) go(p); else toggleSel(ent); };
+  });
+  updateSel();
+}
+
+function toggleSel(e) {
+  if (!e) return;
+  if (S.sel.has(e.path)) S.sel.delete(e.path); else S.sel.set(e.path, e);
+  renderExplorer();
+}
+function selAdd(e) { S.sel.set(e.path, e); updateSel(); }
+function updateSel() {
+  const n = S.sel.size;
+  $('#selbar').classList.toggle('on', n > 0);
+  if (!n) return;
+  let tot = 0, danger = 0;
+  S.sel.forEach(v => { tot += v.size || 0; if (v.tag && v.tag.safety === 'danger') danger++; });
+  $('#selinfo').innerHTML = `<b>${n}</b> seleccionado${n>1?'s':''} · <b>${fb(tot)}</b>` +
+    (danger ? ` · <span style="color:var(--danger)">⚠ ${danger} marcado${danger>1?'s':''} como “no tocar”</span>` : '');
+}
+$('#bClear').onclick = () => { S.sel.clear(); renderExplorer(); updateSel(); };
+
+/* ================= pestañas ================= */
+$$('.tab').forEach(t => t.onclick = () => {
+  showTab(t.dataset.t);
+  if (S.tab === 'hot') renderHot();
+  if (S.tab === 'junk') renderJunk();
+  if (S.tab === 'files') renderFiles();
+  if (S.tab === 'types') renderTypes();
+  if (S.tab === 'stale') renderStale();
+  if (S.tab === 'tree') renderTree();
+});
+
+async function need(key, url) {
+  if (!S.loaded[key]) S.loaded[key] = await get(url);
+  return S.loaded[key];
+}
+
+async function renderHot() {
+  const el = $('#p-hot'); el.innerHTML = '<div class="empty">Calculando…</div>';
+  const d = await need('hot', '/api/hotspots');
+  if (!d.items || !d.items.length) { el.innerHTML = '<div class="empty">Nada destacable.</div>'; return; }
+  el.innerHTML = `<div class="cards">
+    <div class="card" style="background:#11151b">
+      <div class="why">El árbol partido en <b>trozos que no se solapan</b>. Se baja por cada rama mientras
+      el peso se pueda atribuir a una subcarpeta concreta; donde deja de poderse, ahí para. Lee de arriba
+      abajo: eso es literalmente dónde está tu disco.</div>
+      <div class="how" style="margin-top:6px">“resto” = lo que queda repartido en esa carpeta entre muchas
+      cosas pequeñas, ninguna lo bastante grande para salir por su cuenta.</div></div>` +
+    d.items.map(h => `<div class="card click" data-p="${esc(h.path)}">
+      <h3><span class="big">${fb(h.size)}</span>
+        <span class="badge ${h.kind === 'resto' ? 'b-review' : 'b-safe'}">${h.kind === 'resto' ? 'resto disperso' : 'carpeta'}</span>
+        <span class="mut" style="font-weight:400">${h.pct.toFixed(1)}% del total · ${fn(h.files)} ficheros · ${ago(h.mtime)}</span></h3>
+      <div class="p">${esc(h.path)}</div>
+      ${h.kind === 'resto' ? `<div class="why">Aparte de ${h.nbig>1 ? 'sus '+h.nbig+' subcarpetas grandes' : 'su subcarpeta grande'},
+        aquí quedan <b>${fb(h.size)}</b> repartidos entre ${fn(h.nsmall)} subcarpeta${h.nsmall===1?'':'s'} pequeña${h.nsmall===1?'':'s'}
+        y ${fb(h.own)} de ficheros sueltos. Nada destaca por sí solo: es acumulación.</div>` : ''}
+      ${h.children.length ? '<div class="why">Dentro: ' + h.children.map(c =>
+        `${esc(c.name)} <b class="dim">${fb(c.size)}</b>`).join(' · ') + '</div>' : ''}
+      ${h.own && h.kind !== 'resto' ? `<div class="how">${fb(h.own)} son ficheros sueltos en esta misma carpeta</div>` : ''}
+    </div>`).join('') + '</div>';
+  $$('#p-hot .card.click').forEach(c => c.onclick = () => goto(c.dataset.p));
+}
+
+async function renderJunk() {
+  const el = $('#p-junk'); el.innerHTML = '<div class="empty">Analizando…</div>';
+  const d = await need('junk', '/api/junk');
+  if (!d.items) { el.innerHTML = '<div class="empty">Sin datos.</div>'; return; }
+  const bySafe = {safe:[], review:[], danger:[]}, cont = [];
+  d.items.forEach(i => { if (i.container) cont.push(i); else bySafe[i.safety].push(i); });
+  el.innerHTML = `
+  <div class="kpis">
+    <div class="kpi"><div class="v" style="color:var(--safe)">${fb(d.reclaimable)}</div>
+      <div class="l">Recuperable sin pensar (se regenera solo)</div>
+      <div class="mini"><i style="width:${(d.reclaimable*100/(d.total||1)).toFixed(1)}%;background:var(--safe)"></i></div></div>
+    <div class="kpi"><div class="v" style="color:var(--review)">${fb(d.review)}</div>
+      <div class="l">Recuperable si lo revisas antes</div>
+      <div class="mini"><i style="width:${(d.review*100/(d.total||1)).toFixed(1)}%;background:var(--review)"></i></div></div>
+    <div class="kpi"><div class="v">${fn(d.items.length)}</div><div class="l">Carpetas identificadas</div></div>
+  </div>
+  <div class="cards">
+    <div class="card" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+      <button class="primary" id="selSafe">Seleccionar todo lo seguro (${fb(d.reclaimable)})</button>
+      <button id="selReview">Añadir lo de “revisar”</button>
+      <span class="dim">Se añade a la selección de abajo; desde ahí decides papelera, borrado o script.</span>
+    </div>
+    ${cont.length ? '<div class="sect" style="padding:0 2px">Cajones de sastre · mira dentro</div>' +
+      cont.map(i => `<div class="card click cnt" data-p="${esc(i.path)}">
+        <h3><span class="big">${fb(i.size)}</span>
+          <span class="badge b-review">${esc(i.label)}</span>
+          <span class="mut" style="font-weight:400;font-size:12px">${fn(i.files)} ficheros · ${ago(i.mtime)}</span></h3>
+        <div class="p">${esc(i.path)}</div>
+        <div class="why">${esc(i.why)}</div>
+        <div class="how">→ ${esc(i.how)} · clic para entrar</div>
+      </div>`).join('') : ''}
+    ${['safe','review','danger'].map(sf => bySafe[sf].length ? `
+      <div class="sect" style="padding:0 2px">${sf==='safe'?'Seguro de borrar':sf==='review'?'Revisar antes':'No tocar'} · ${fb(bySafe[sf].reduce((a,b)=>a+b.size,0))}</div>` +
+      bySafe[sf].map(i => `<div class="card sel-card ${sf==='danger'?'no':''} ${S.sel.has(i.path)?'on':''}"
+             data-p="${esc(i.path)}" data-safety="${i.safety}"
+             title="${sf==='danger'?'Marcada como no tocar':'Clic en cualquier parte para seleccionarla'}">
+        <h3><input type="checkbox" class="cbx jk" ${sf==='danger'?'disabled':''} ${S.sel.has(i.path)?'checked':''}>
+          <span class="big">${fb(i.size)}</span>
+          <span class="badge b-${i.safety}">${esc(i.label)}</span>
+          <span class="mut" style="font-weight:400;font-size:12px">${fn(i.files)} ficheros · ${ago(i.mtime)}</span>
+          <span class="spacer"></span>
+          <button class="gobtn" data-p="${esc(i.path)}">Abrir carpeta →</button></h3>
+        <div class="p link" data-p="${esc(i.path)}">${esc(i.path)}</div>
+        <div class="why">${esc(i.why)}</div>
+        <div class="how">→ ${esc(i.how)}</div>
+      </div>`).join('') : '').join('')}
+  </div>`;
+  const idx = {}; d.items.forEach(i => idx[i.path] = i);
+  // la tarjeta entera es el objetivo: la casilla sola era de 16 px y fallarla dolía
+  $$('#p-junk .sel-card').forEach(c => c.onclick = () => {
+    if (c.dataset.safety === 'danger') return;
+    const i = idx[c.dataset.p];
+    if (!i) return;
+    if (S.sel.has(i.path)) S.sel.delete(i.path);
+    else S.sel.set(i.path, {path:i.path, size:i.size, name:i.path, dir:true, tag:{safety:i.safety}});
+    const on = S.sel.has(i.path);
+    c.classList.toggle('on', on);
+    c.querySelector('.cbx').checked = on;
+    updateSel();
+  });
+  // para navegar hay que pedirlo a propósito
+  $$('#p-junk .gobtn, #p-junk .p.link').forEach(el => el.onclick = ev => {
+    ev.stopPropagation(); goto(el.dataset.p);
+  });
+  $$('#p-junk .cnt').forEach(c => c.onclick = () => goto(c.dataset.p));
+  const addAll = sf => { d.items.filter(i => i.safety === sf && !i.container).forEach(i =>
+      S.sel.set(i.path, {path:i.path, size:i.size, name:i.path, dir:true, tag:{safety:i.safety}}));
+    $$('#p-junk .sel-card').forEach(c => { const it = idx[c.dataset.p];
+      if (it && it.safety === sf && !it.container) {
+        c.classList.add('on'); c.querySelector('.cbx').checked = true;
+      } });
+    updateSel(); };
+  $('#selSafe').onclick = () => addAll('safe');
+  $('#selReview').onclick = () => addAll('review');
+}
+
+async function renderFiles() {
+  const el = $('#p-files'); el.innerHTML = '<div class="empty">Cargando…</div>';
+  const d = await need('files', '/api/topfiles');
+  if (!d.items || !d.items.length) { el.innerHTML = '<div class="empty">Sin datos.</div>'; return; }
+  const max = d.items[0].size || 1;
+  el.innerHTML = `<table><thead><tr><th style="width:34px"></th><th>Fichero</th>
+    <th style="width:20%">Peso</th><th class="n" style="width:104px">Tamaño</th>
+    <th style="width:34%">Carpeta</th></tr></thead><tbody>` +
+    d.items.map(f => `<tr data-p="${esc(f.path)}">
+      <td class="selcell" title="Seleccionar"><input type="checkbox" class="cbx tf" ${S.sel.has(f.path)?'checked':''}></td>
+      <td><div class="nm"><span class="ic">📄</span><span class="t">${esc(f.name)}</span>
+        ${f.why ? `<span class="badge ${f.sys?'b-danger':'b-review'}" title="${esc(f.why)}">${f.sys?'sistema':'revisar'}</span>` : ''}</div>
+        ${f.why ? `<div class="dim" style="font-size:11.5px">${esc(f.why)} → ${esc(f.how)}</div>` : ''}</td>
+      <td><div class="wbar"><i style="width:${(f.size*100/max).toFixed(2)}%"></i></div></td>
+      <td class="n"><b>${fb(f.size)}</b></td>
+      <td class="mono dim" style="text-overflow:ellipsis;white-space:nowrap"
+        title="${esc(f.path)}">${esc(f.path.replace(/\\[^\\]*$/, ''))}</td>
+    </tr>`).join('') + '</tbody></table>';
+  $$('#p-files tbody tr').forEach(tr => {
+    const p = tr.dataset.p, f = d.items.find(x => x.path === p);
+    tr.querySelector('.selcell').onclick = ev => { ev.stopPropagation();
+      if (S.sel.has(p)) S.sel.delete(p); else S.sel.set(p, {path:p, size:f.size, name:f.name, dir:false});
+      tr.querySelector('.cbx').checked = S.sel.has(p); tr.classList.toggle('sel', S.sel.has(p));
+      updateSel(); };
+    tr.onclick = () => goto(p.replace(/\\[^\\]*$/, ''));
+  });
+}
+
+async function renderTypes() {
+  const el = $('#p-types'); el.innerHTML = '<div class="empty">Cargando…</div>';
+  const d = await need('types', '/api/exts');
+  if (!d.items) { el.innerHTML = '<div class="empty">Sin datos.</div>'; return; }
+  const max = d.items.length ? d.items[0].size : 1;
+  el.innerHTML = '<div class="cards">' + d.items.map(c => `<div class="card">
+    <h3><span class="big">${fb(c.size)}</span> ${esc(c.cat)}
+      <span class="mut" style="font-weight:400;font-size:12px">${fn(c.count)} ficheros · ${(c.size*100/(d.total||1)).toFixed(1)}% del total</span></h3>
+    <div class="mini" style="height:8px"><i style="width:${(c.size*100/max).toFixed(1)}%;background:linear-gradient(90deg,var(--bar),var(--bar2))"></i></div>
+    <div class="how" style="margin-top:8px">${c.top.map(t => `${esc(t.ext)} <b class="mut">${fb(t.size)}</b>`).join(' · ')}</div>
+  </div>`).join('') + '</div>';
+}
+
+async function renderStale() {
+  const el = $('#p-stale'); el.innerHTML = '<div class="empty">Cargando…</div>';
+  const d = await need('stale', '/api/stale');
+  if (!d.items || !d.items.length) {
+    el.innerHTML = '<div class="empty">No hay carpetas grandes olvidadas. Sospechoso.</div>'; return; }
+  el.innerHTML = `<div class="cards"><div class="card" style="background:#11151b"><div class="why">
+    Carpetas de más de 1 GB cuyo fichero más reciente tiene más de un año. No significa que sobren,
+    pero es el primer sitio donde mirar.</div></div></div>
+    <table><thead><tr><th style="width:34px"></th><th>Carpeta</th>
+    <th class="n" style="width:104px">Tamaño</th>
+    <th class="n" style="width:130px">Último cambio</th>
+    <th class="n" style="width:92px">Ficheros</th></tr></thead><tbody>` +
+    d.items.map(i => `<tr data-p="${esc(i.path)}">
+      <td class="selcell" title="Seleccionar"><input type="checkbox" class="cbx st" ${S.sel.has(i.path)?'checked':''}></td>
+      <td class="mono" style="text-overflow:ellipsis;white-space:nowrap" title="${esc(i.path)}">${esc(i.path)}</td>
+      <td class="n"><b>${fb(i.size)}</b></td>
+      <td class="n mut">${ago(i.mtime)}</td>
+      <td class="n dim">${fn(i.files)}</td></tr>`).join('') + '</tbody></table>';
+  $$('#p-stale tbody tr').forEach(tr => {
+    const p = tr.dataset.p, it = d.items.find(x => x.path === p);
+    tr.querySelector('.selcell').onclick = ev => { ev.stopPropagation();
+      if (S.sel.has(p)) S.sel.delete(p); else S.sel.set(p, {path:p, size:it.size, name:p, dir:true});
+      tr.querySelector('.cbx').checked = S.sel.has(p); tr.classList.toggle('sel', S.sel.has(p));
+      updateSel(); };
+    tr.onclick = () => goto(p);
+  });
+}
+
+/* ================= treemap ================= */
+function tmLayout(vals, x, y, w, h) {
+  const res = []; let i = 0, rx = x, ry = y, rw = w, rh = h;
+  let total = vals.reduce((a,b) => a+b, 0);
+  while (i < vals.length && total > 0 && rw > 0.5 && rh > 0.5) {
+    const vert = rw >= rh, len = vert ? rh : rw;
+    let row = [], rowSum = 0, best = Infinity, j = i;
+    while (j < vals.length) {
+      const nsum = rowSum + vals[j];
+      const thick = ((rw*rh) * (nsum/total)) / len;
+      let wr = 0;
+      for (let k = i; k <= j; k++) {
+        const side = thick ? ((rw*rh)*(vals[k]/total))/thick : 0;
+        if (side > 0) wr = Math.max(wr, Math.max(thick/side, side/thick));
+      }
+      if (row.length && wr > best) break;
+      best = wr; row.push(vals[j]); rowSum = nsum; j++;
+    }
+    const thick = ((rw*rh) * (rowSum/total)) / len;
+    let off = 0;
+    for (let k = 0; k < row.length; k++) {
+      const side = thick ? ((rw*rh)*(row[k]/total))/thick : 0;
+      if (vert) res.push({x:rx, y:ry+off, w:thick, h:side});
+      else      res.push({x:rx+off, y:ry, w:side, h:thick});
+      off += side;
+    }
+    if (vert) { rx += thick; rw -= thick; } else { ry += thick; rh -= thick; }
+    total -= rowSum; i = j;
+  }
+  while (res.length < vals.length) res.push({x:0,y:0,w:0,h:0});
+  return res;
+}
+function renderTree() {
+  const d = S.dir; const el = $('#p-tree');
+  if (!d) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="cards" style="padding:12px 14px 0"><div class="card" style="background:#11151b">
+    <div class="why">Cada rectángulo es una carpeta o fichero de <b class="mono">${esc(d.path)}</b>,
+    con el área proporcional a lo que ocupa. Clic para entrar.</div></div></div><div id="tm"></div>`;
+  const box = $('#tm');
+  const items = d.entries.filter(e => e.size > 0).slice(0, 160);
+  if (!items.length) { box.innerHTML = '<div class="empty">Nada que dibujar.</div>'; return; }
+  const draw = () => {
+    const W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) { setTimeout(draw, 120); return; }
+    const rects = tmLayout(items.map(e => e.size), 0, 0, W, H);
+    box.innerHTML = items.map((e,i) => {
+      const r = rects[i]; if (r.w < 2 || r.h < 2) return '';
+      const sf = e.tag ? e.tag.safety : '';
+      const hue = sf==='safe' ? 135 : sf==='review' ? 40 : sf==='danger' ? 0 : (210 + (i*37)%80);
+      const sat = sf ? 45 : 32, lig = 24 + (i%5)*3;
+      const show = r.w > 54 && r.h > 24;
+      return `<div class="tmb" data-p="${esc(e.path)}" data-d="${e.dir?1:0}"
+        style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;
+        background:hsl(${hue},${sat}%,${lig}%)" title="${esc(e.name)} — ${fb(e.size)}">
+        ${show ? `<div class="l">${esc(e.name)}</div><div class="s">${fb(e.size)}</div>` : ''}</div>`;
+    }).join('');
+    $$('#tm .tmb').forEach(b => b.onclick = () => { if (b.dataset.d === '1') go(b.dataset.p); });
+  };
+  draw();
+}
+let tmResize = null;
+window.addEventListener('resize', () => {
+  clearTimeout(tmResize);
+  tmResize = setTimeout(() => { if (S.tab === 'tree') renderTree(); }, 200);
+});
+
+/* ================= acciones ================= */
+function modal(title, html, foot) {
+  $('#mtitle').textContent = title;
+  $('#mbody').innerHTML = html;
+  $('#mfoot').innerHTML = '';
+  (foot||[]).forEach(f => {
+    const b = document.createElement('button');
+    b.textContent = f.label; if (f.cls) b.className = f.cls;
+    b.onclick = f.fn; $('#mfoot').appendChild(b);
+  });
+  $('#ov').classList.add('on');
+}
+function closeModal() { $('#ov').classList.remove('on'); }
+$('#ov').onclick = e => { if (e.target.id === 'ov') closeModal(); };
+
+function selList() { return Array.from(S.sel.values()); }
+function selPaths() { return selList().map(v => v.path); }
+
+function confirmDelete(mode) {
+  const items = selList();
+  if (!items.length) return;
+  const tot = items.reduce((a,b) => a + (b.size||0), 0);
+  const danger = items.filter(i => i.tag && i.tag.safety === 'danger');
+  const perm = mode === 'perm';
+  modal(perm ? 'Borrar definitivamente' : 'Mover a la papelera', `
+    ${danger.length ? `<div class="warn"><b>Cuidado.</b> ${danger.length} de los elementos están marcados
+      como “no tocar”: son cosas del sistema o repositorios Git. Quítalos de la selección salvo que sepas
+      muy bien lo que haces.</div>` : ''}
+    ${perm ? `<div class="warn"><b>Esto no va a la papelera.</b> No hay vuelta atrás.
+      Rápido y sin ocupar espacio intermedio, pero irreversible.</div>`
+           : `<div class="ok">Va a la papelera de reciclaje: si te equivocas, puedes restaurarlo.
+      Ojo: mientras esté ahí sigue ocupando disco, hay que vaciarla después.</div>`}
+    <p><b>${items.length}</b> elemento${items.length>1?'s':''} · <b>${fb(tot)}</b></p>
+    <div class="list">${items.map(i =>
+      `<div><span>${esc(i.path)}</span><span class="mut">${fb(i.size)}</span></div>`).join('')}</div>`,
+    [{label:'Cancelar', fn:closeModal},
+     {label: perm ? 'Sí, borrar definitivamente' : 'Mover a la papelera',
+      cls: perm ? 'danger' : 'primary', fn: () => runDelete(mode)}]);
+}
+
+async function runDelete(mode) {
+  const paths = selPaths();
+  const r = await post('/api/delete', {paths, mode: mode === 'perm' ? 'perm' : 'trash'});
+  if (r.error) { alert(r.error); return; }
+  modal('Borrando…', '<div id="djob">Empezando…</div>', []);
+  const tick = async () => {
+    const j = await get('/api/job', {id: r.job});
+    const pc = j.total ? Math.round(j.done*100/j.total) : 0;
+    $('#djob').innerHTML = `<p><b>${j.done}</b> de ${j.total} · liberado <b>${fb(j.freed)}</b></p>
+      <div class="mini" style="height:9px"><i style="width:${pc}%;background:var(--acc)"></i></div>
+      <div class="dim mono" style="margin-top:9px;word-break:break-all">${esc(j.current||'')}</div>`;
+    if (!j.finished) { setTimeout(tick, 400); return; }
+    S.sel.clear(); S.loaded = {};
+    modal('Hecho', `<div class="ok">Liberados <b>${fb(j.freed)}</b> en ${j.done} elemento${j.done>1?'s':''}.</div>
+      ${j.errors && j.errors.length ? `<p class="mut">No se pudieron borrar ${j.errors.length}
+        (en uso, protegidos o sin permisos):</p><div class="list">${j.errors.map(e=>'<div>'+esc(e)+'</div>').join('')}</div>` : ''}`,
+      [{label:'Cerrar', cls:'primary', fn: () => { closeModal(); go(S.path); warmTabs(); }}]);
+  };
+  tick();
+}
+
+$('#bTrash').onclick = () => confirmDelete('trash');
+$('#bPerm').onclick  = () => confirmDelete('perm');
+$('#bCopy').onclick  = () => { navigator.clipboard.writeText(selPaths().join('\r\n'));
+  $('#bCopy').textContent = 'Copiado ✓'; setTimeout(() => $('#bCopy').textContent = 'Copiar rutas', 1200); };
+$('#bOpen').onclick  = () => { const p = selPaths()[0] || S.path; post('/api/open', {path:p}); };
+$('#bScript').onclick = async () => {
+  const r = await post('/api/script', {paths: selPaths()});
+  modal('Script de limpieza', `<p class="mut">Guárdalo y ejecútalo tú cuando quieras.
+    Primero con <kbd>-WhatIf</kbd> para ver qué haría sin tocar nada.</p>
+    <textarea id="scr" spellcheck="false">${esc(r.script)}</textarea>`,
+    [{label:'Copiar', fn: () => { $('#scr').select(); document.execCommand('copy'); }},
+     {label:'Guardar .ps1', cls:'primary', fn: () => {
+        const blob = new Blob([r.script], {type:'text/plain;charset=utf-8'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'limpieza-diskhoard.ps1'; a.click();
+     }},
+     {label:'Cerrar', fn:closeModal}]);
+};
+
+/* ================= teclado ================= */
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (e.key === 'Escape') { if ($('#ov').classList.contains('on')) closeModal();
+    else if (S.sel.size) { S.sel.clear(); renderExplorer(); } return; }
+  if ($('#main').style.display === 'none') return;
+  if (e.key === 'Backspace') { e.preventDefault(); if (S.dir && S.dir.parent) go(S.dir.parent); }
+  if (e.key === 'Delete' && S.sel.size) { e.preventDefault(); confirmDelete('trash'); }
+  if (e.key === 'a' && (e.ctrlKey || e.metaKey) && S.tab === 'explorer') {
+    e.preventDefault();
+    (S.dir.entries || []).forEach(en => S.sel.set(en.path, en));
+    renderExplorer();
+  }
+});
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Salidas de depuración y ficheros de trabajo
+_*.log
+_*.err
+_*.txt
+_pruebas/
+
+# Script personal de mantenimiento (contiene rutas y cuentas propias)
+limpiar-docker-concrete.ps1
