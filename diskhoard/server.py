@@ -15,13 +15,48 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
+from . import __version__
+from . import agent as agentmod
 from . import junk as junkmod
 from . import scanner as scanmod
 from .winfs import (IS_WIN, delete_permanent, list_drives, long_path,
                     norm_display, send_to_trash)
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-TOKEN = secrets.token_urlsafe(18)
+PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_PORT = 8817
+SERVICE = "disk-hoard"
+
+
+def data_dir():
+    """Carpeta de datos: token del puente MCP, scripts generados, url en uso."""
+    return os.environ.get("DISKHOARD_DATA_DIR") or os.path.join(PKG_ROOT, "data")
+
+
+def load_token():
+    """Un token por instalacion, guardado en data/mcp-token para el puente MCP.
+
+    La interfaz lo recibe en la URL como siempre; el puente lo lee del fichero.
+    Si el fichero no existe se crea (solo legible por el usuario donde el SO
+    lo permite).
+    """
+    path = os.path.join(data_dir(), "mcp-token")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            tok = fh.read().strip()
+        if len(tok) >= 16:
+            return tok
+    except OSError:
+        pass
+    tok = secrets.token_urlsafe(24)
+    os.makedirs(data_dir(), exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(tok)
+    return tok
+
+
+TOKEN = load_token()
 
 
 class State:
@@ -31,9 +66,12 @@ class State:
         self.cache = {}
         self.jobs = {}
         self.job_seq = 0
+        self.port = 0
+        self.started = time.time()
 
 
 ST = State()
+AGENT = agentmod.Agent(sys.modules[__name__])
 
 
 # ------------------------------------------------------------------ arbol
@@ -447,6 +485,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         p = u.path
+        if p == "/api/health":
+            return self._json(api_health())
         if p.startswith("/api/"):
             if not self._auth(qs):
                 return self._json({"error": "token invalido"}, 403)
@@ -476,6 +516,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(api_exts())
         if p == "/api/job":
             return self._json(api_job(one("id")))
+        if p == "/api/agent/tools":
+            return self._json({"tools": agentmod.CATALOG, "instructions": agentmod.INSTRUCTIONS,
+                               "service": SERVICE, "version": __version__})
+        if p == "/api/agent/log":
+            return self._json(AGENT.recent(int(one("since", "0") or 0)))
         return self._json({"error": "endpoint desconocido"}, 404)
 
     def do_POST(self):
@@ -507,6 +552,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/quit":
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return self._json({"ok": True})
+        if p == "/api/agent/call":
+            out, is_err = AGENT.call(body.get("name", ""), body.get("arguments") or {})
+            return self._json(out, 400 if is_err else 200)
         return self._json({"error": "endpoint desconocido"}, 404)
 
     def _file(self, path):
@@ -526,8 +574,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def free_port(start=8777):
-    for port in range(start, start + 60):
+def api_health():
+    """Sin token: es lo que Faustus y el puente MCP consultan para saber si estamos."""
+    sc = ST.scanner
+    scan = None
+    if sc is not None:
+        scan = {"root": sc.root_display, "done": sc.done, "error": sc.error or None,
+                "size": sc.root.size if sc.done and not sc.error else None}
+    return {"service": SERVICE, "name": "DiskHoard", "version": __version__,
+            "status": "healthy", "port": ST.port, "uptime_s": round(time.time() - ST.started),
+            "scan": scan, "agent_calls": AGENT.seq, "tools": len(agentmod.CATALOG)}
+
+
+def free_port(start=DEFAULT_PORT, span=60):
+    for port in range(start, start + span):
         with socket.socket() as s:
             try:
                 s.bind(("127.0.0.1", port))
@@ -537,21 +597,65 @@ def free_port(start=8777):
     return 0
 
 
-def main(argv=None):
-    argv = argv if argv is not None else sys.argv[1:]
-    port = free_port()
-    if not port:
-        print("No hay puertos libres")
-        return 1
+def _parse_args(argv):
+    opts = {"browser": True, "port": 0, "host": "127.0.0.1"}
+    it = iter(argv)
+    for a in it:
+        if a == "--no-browser":
+            opts["browser"] = False
+        elif a == "--port":
+            opts["port"] = int(next(it, "0") or 0)
+        elif a.startswith("--port="):
+            opts["port"] = int(a.split("=", 1)[1] or 0)
+        elif a in ("-h", "--help"):
+            print("uso: python -m diskhoard [--port N] [--no-browser]\n"
+                  "     DISKHOARD_PORT y DISKHOARD_DATA_DIR tambien valen como variables de entorno.")
+            raise SystemExit(0)
+    if not opts["port"]:
+        opts["port"] = int(os.environ.get("DISKHOARD_PORT") or 0) or None
+    return opts
+
+
+def serve(port=None, open_browser=False):
+    """Arranca el servidor y devuelve (servidor, url).
+
+    port=None: el 8817 o el primero libre a partir de el. port=0: uno
+    cualquiera que elija el sistema (tests). Otro valor: ese o error.
+    """
+    if port is None:
+        port = free_port()
+        if not port:
+            raise OSError("No hay puertos libres a partir del %d" % DEFAULT_PORT)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     srv.daemon_threads = True
-    url = "http://127.0.0.1:%d/?t=%s" % (port, TOKEN)
+    ST.port = srv.server_address[1]
+    base = "http://127.0.0.1:%d" % ST.port
+    try:
+        os.makedirs(data_dir(), exist_ok=True)
+        with open(os.path.join(data_dir(), "url"), "w", encoding="utf-8") as fh:
+            fh.write(base)
+    except OSError:
+        pass
+    url = "%s/?t=%s" % (base, TOKEN)
+    if open_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    return srv, url
+
+
+def main(argv=None):
+    argv = argv if argv is not None else sys.argv[1:]
+    opts = _parse_args(argv)
+    try:
+        srv, url = serve(opts["port"], open_browser=opts["browser"])
+    except OSError as exc:
+        print("No se puede escuchar: %s" % exc)
+        return 1
     print("", flush=True)
-    print("  DiskHoard escuchando en %s" % url, flush=True)
+    print("  DiskHoard %s escuchando en %s" % (__version__, url), flush=True)
+    print("  Puente MCP: python mcp_server.py  (token en %s)" % os.path.join(data_dir(), "mcp-token"),
+          flush=True)
     print("  Deja esta ventana abierta. Ctrl+C para salir.", flush=True)
     print("", flush=True)
-    if "--no-browser" not in argv:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -11,3 +11,7 @@ _pruebas/
 
 # Script personal de mantenimiento (contiene rutas y cuentas propias)
 limpiar-docker-concrete.ps1
+
+# Datos locales de la app: token del puente MCP, url en uso, scripts generados
+data/
+.pytest_cache/

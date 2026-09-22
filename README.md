@@ -8,7 +8,9 @@ Nace de un problema concreto: tener cientos de gigas ocupados sin saber en qué,
 abriendo *Propiedades* carpeta por carpeta, bajando un nivel cada vez que aparece una
 gorda. El explorador de Windows sabe la respuesta pero no te la da.
 
-Sin dependencias: Python 3 de la librería estándar y el navegador que ya tienes.
+Sin dependencias: Python 3 de la librería estándar y el navegador que ya tienes. Incluido
+el servidor MCP: cualquier asistente (Faustus, Claude Desktop, Cursor…) puede escanear,
+explicarte qué es cada carpeta y limpiar por ti, con las mismas reglas de seguridad.
 
 ![Explorador](docs/explorador.jpg)
 
@@ -47,7 +49,8 @@ cosas pequeñas se marca como «resto disperso».
 
 Un catálogo de carpetas conocidas: `node_modules`, entornos virtuales, cachés de
 conda/pip/npm/Gradle/Maven, `target/` de Rust, `Library/` de Unity, intermedios de Unreal,
-modelos de Ollama y Hugging Face, temporales de Windows, papelera, discos de Docker y WSL…
+modelos de Ollama, Hugging Face y LM Studio, cachés de uv/Bun/Go/Flutter, shaders de la GPU,
+cachés de Spotify/Adobe/DaVinci, temporales de Windows, papelera, discos de Docker y WSL…
 
 Cada una viene con **qué es, si se puede borrar y cómo se regenera**, clasificada en tres
 niveles:
@@ -94,6 +97,55 @@ Nada se borra sin confirmación explícita en un diálogo que lista lo seleccion
 si hay algo marcado como «no tocar». Tras borrar, **⟳ esta carpeta** vuelve a leer solo
 ese subárbol en un par de segundos y te dice cuánto ha cambiado.
 
+## Control por agente (MCP)
+
+`mcp_server.py` es un servidor MCP por stdio, también sin dependencias. Expone 14
+herramientas que reenvía a la app en marcha (y si no está en marcha, la arranca):
+
+| Herramienta | Qué hace |
+|---|---|
+| `disk_drives` | unidades con espacio usado/libre y atajos |
+| `disk_scan` / `disk_status` | escanea una carpeta o unidad (espera a que acabe) / progreso |
+| `disk_dir` | contenido de una carpeta del escaneo, de mayor a menor, con etiqueta de basura |
+| `disk_hotspots` | los puntos calientes, sin solapes |
+| `disk_junk` | basura conocida filtrada por seguridad, categoría o tamaño, con totales |
+| `disk_stale` / `disk_top_files` / `disk_types` | sin tocar, ficheros grandes, por tipo |
+| `disk_find` | buscar ficheros por patrón, tamaño o antigüedad en cualquier carpeta |
+| `disk_explain` | qué es una carpeta o fichero, si se puede borrar y por qué |
+| `disk_script` | genera y guarda el `.ps1` de limpieza (`-WhatIf`) sin tocar nada |
+| `disk_delete` | borra: a la papelera por defecto; definitivo solo con `mode="permanent"` y `confirm=true` |
+| `disk_rescan` | vuelve a leer una subcarpeta y empalma los números |
+
+Lo que un agente **nunca** puede borrar, diga lo que diga: raíces de unidad, el perfil de
+usuario y sus carpetas principales, `Windows`, `Archivos de programa`, `ProgramData` y todo lo
+que el catálogo marca como «no tocar» (`.git`, `WinSxS`, `Windows\Installer`…). Dentro de
+`Windows` solo pasa lo que el catálogo conoce como seguro (descargas de Windows Update,
+volcados, logs de CBS).
+
+Todo lo que hace el agente queda en un registro que la interfaz enseña en la cabecera
+(«MCP · delete · …»); clic para ver la lista. Si el agente escanea otra raíz o borra algo,
+la interfaz lo sigue sola.
+
+Configuración para un cliente MCP genérico (Claude Desktop, Cursor…):
+
+```json
+{ "mcpServers": { "diskhoard": { "command": "python", "args": ["C:\\ruta\\DiskHoard\\mcp_server.py"] } } }
+```
+
+Variables opcionales: `DISKHOARD_URL` (por defecto `http://127.0.0.1:8817`),
+`DISKHOARD_DATA_DIR` (token, url y scripts generados; por defecto `data/`),
+`DISKHOARD_AUTOSTART=0` para que el puente no arranque la app por su cuenta.
+
+### Como plugin de Faustus
+
+El repo lleva `faustus-plugin.json`: con DiskHoard en marcha, Faustus la ve en el puerto
+8817, ofrece conectarla con el formulario relleno, y usa su propio Python para el puente
+(no hace falta entorno virtual). Desde el chat: «¿dónde se me va el disco?», «limpia lo
+seguro de `D:\proyectos`», «¿qué es esta carpeta?».
+
+La app también se puede arrancar a mano en el puerto que quieras:
+`python -m diskhoard --port 8817 --no-browser`. `/api/health` responde sin token.
+
 ## Atajos
 
 | Tecla | Acción |
@@ -118,9 +170,13 @@ ese subárbol en un par de segundos y te dice cuánto ha cambiado.
   papelera trabaja con la ruta normal.)
 - **No se siguen *junctions* ni enlaces simbólicos.** Si se siguen, el mismo contenido se
   cuenta varias veces y los totales mienten.
-- **Servidor local** con `http.server`, escuchando solo en `127.0.0.1` y con un token
-  aleatorio distinto en cada arranque. La interfaz entera es un único fichero HTML sin
+- **Servidor local** con `http.server`, escuchando solo en `127.0.0.1` y con un token que
+  se genera una vez y se guarda en `data/mcp-token`: la interfaz lo lleva en la URL y el
+  puente MCP lo lee del fichero. La interfaz entera es un único fichero HTML sin
   dependencias externas.
+- **El puente MCP no sabe de discos.** Habla JSON-RPC por stdin/stdout y reenvía cada
+  llamada por HTTP; el catálogo de herramientas vive en `diskhoard/agent.py`, el mismo
+  módulo que las ejecuta, así que no pueden discrepar.
 
 ### Rendimiento
 
@@ -140,13 +196,19 @@ DiskHoard/
 ├── DiskHoard.bat          arranque normal
 ├── DiskHoard (admin).bat  arranque como administrador
 ├── selftest.py            modo consola
+├── mcp_server.py          servidor MCP (stdio) para agentes
+├── faustus-plugin.json    manifiesto para conectarla a Faustus
+├── tests/                 pytest: herramientas del agente y puente MCP
 └── diskhoard/
     ├── scanner.py         motor de escaneo multihilo
     ├── junk.py            catálogo de basura + puntos calientes
     ├── winfs.py           rutas largas, unidades, papelera, borrado
+    ├── agent.py           catálogo de herramientas del agente y reglas de borrado
     ├── server.py          servidor HTTP local + API
     └── web/index.html     interfaz entera en un fichero
 ```
+
+Tests: `python -m pytest -q tests` (solo necesita pytest).
 
 ## Limitaciones
 

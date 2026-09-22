@@ -86,6 +86,16 @@ header{display:flex;align-items:center;gap:10px;padding:8px 12px;min-width:0;
 .brand{font-weight:800;letter-spacing:-.3px;margin-right:4px;flex:0 0 auto}
 #rootinfo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:12px;text-align:right}
 .brand span{color:var(--acc)}
+.agentpill{display:none;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;
+  padding:3px 10px;font-size:11.5px;color:var(--mut);cursor:pointer;max-width:320px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.agentpill.on{display:inline-flex}
+.agentpill i{width:7px;height:7px;border-radius:50%;background:var(--acc);flex:0 0 auto}
+.agentpill:hover{border-color:var(--acc);color:var(--acc)}
+.alog{font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5}
+.alog div{padding:3px 0;border-bottom:1px solid var(--line)}
+.alog b{color:var(--acc);margin-right:8px}
+.alog span{color:var(--mut);margin-right:8px}
 .tabs{display:flex;gap:2px;padding:0 8px;border-bottom:1px solid var(--line);
   background:var(--panel);overflow-x:auto}
 .tab{padding:8px 13px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;
@@ -268,6 +278,7 @@ kbd{background:#0b0e13;border:1px solid var(--line);border-bottom-width:2px;bord
       <button id="btnRescan" title="Volver a escanear todo el árbol desde cero">⟳ todo</button>
       <input id="filter" placeholder="Filtrar en esta carpeta…" style="width:200px">
       <div style="flex:1"></div>
+      <span id="agent" class="agentpill" title="Lo último que ha hecho el agente (MCP). Clic para ver el registro"><i></i><span></span></span>
       <span id="rootinfo" class="mut"></span>
       <button id="btnNew">Cambiar punto de partida</button>
     </header>
@@ -917,6 +928,68 @@ document.addEventListener('keydown', e => {
 });
 
 boot();
+
+/* ================= agente (MCP) =================
+   Si Faustus u otro cliente MCP escanea o borra, la interfaz lo sigue:
+   cambia de raiz, refresca la carpeta y ensena lo ultimo que ha hecho. */
+const AG = {seq: 0, items: [], timer: null, log: []};
+function agoShort(t) {
+  const s = Math.max(0, (Date.now()/1000) - t);
+  return s < 60 ? 'hace ' + Math.round(s) + 's' : s < 3600 ? 'hace ' + Math.round(s/60) + ' min' : 'hace ' + Math.round(s/3600) + ' h';
+}
+async function agentPoll() {
+  try {
+    const r = await get('/api/agent/log', {since: AG.seq});
+    if (r.items && r.items.length) {
+      const first = AG.seq === 0;
+      AG.seq = r.seq;
+      AG.log = AG.log.concat(r.items).slice(-200);
+      const last = r.items[r.items.length - 1];
+      $('#agent span').textContent = 'MCP · ' + last.tool.replace('disk_', '') + ' · ' + last.summary;
+      $('#agent').classList.add('on');
+      const changes = r.items.some(i => ['disk_scan', 'disk_delete', 'disk_rescan'].includes(i.tool));
+      if (changes && !first) await followAgent();
+      else if (first) await followAgent();
+    }
+  } catch (e) { /* servidor ocupado: probamos en el siguiente tick */ }
+  AG.timer = setTimeout(agentPoll, 2500);
+}
+async function followAgent() {
+  const p = await get('/api/progress');
+  if (p.idle) return;
+  const scanningOn = $('#scanning').style.display === 'flex';
+  if (!p.done) {                       // el agente ha lanzado un escaneo
+    if (!scanningOn) {
+      S.root = p.root; S.sel.clear(); S.loaded = {};
+      $('#start').style.display = 'none'; $('#main').style.display = 'none';
+      $('#scanning').style.display = 'flex';
+      clearTimeout(pollTimer); poll();
+    }
+    return;
+  }
+  if (scanningOn) return;              // poll() ya se encarga al terminar
+  if (p.root !== S.root) {             // escaneo nuevo de otra raiz
+    S.root = p.root; S.sel.clear(); S.loaded = {}; S.back = null;
+    S.stat = fn(p.files) + ' ficheros · ' + fn(p.dirs) + ' carpetas' + (p.errors ? ' · ' + fn(p.errors) + ' sin permiso' : '');
+    $('#start').style.display = 'none'; $('#scanning').style.display = 'none';
+    $('#main').style.display = 'flex';
+    $('#rootinfo').textContent = fb(p.total) + ' · ' + S.stat;
+    await go(S.root, true); warmTabs();
+    return;
+  }
+  if ($('#main').style.display === 'flex') {   // misma raiz: algo ha cambiado dentro
+    S.loaded = {}; S.sel.clear(); updateSel();
+    await go(S.path || S.root, true); warmTabs();
+    if (S.tab !== 'explorer') showTab(S.tab);
+  }
+}
+$('#agent').onclick = () => {
+  const rows = AG.log.slice().reverse().map(i =>
+    `<div><span>${esc(agoShort(i.t))}</span><b>${esc(i.tool)}</b>${esc(i.summary)}</div>`).join('');
+  modal('Lo que ha hecho el agente', `<div class="alog">${rows || 'Nada todavía.'}</div>`,
+        [{label: 'Cerrar', fn: closeModal}]);
+};
+agentPoll();
 </script>
 </body>
 </html>
