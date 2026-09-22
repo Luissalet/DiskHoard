@@ -351,6 +351,7 @@ def _norm_names(rule):
     return [x.lower() for x in n]
 
 
+_VENV_RULE = next(r for r in RULES if r["id"] == "venv")
 _BY_NAME = {}
 _SUFFIX_ONLY = []
 for _r in RULES:
@@ -407,6 +408,10 @@ def match_rule(path: str, name: str):
         if not _self_marker_ok(rule, path):
             continue
         return rule
+    # un entorno virtual con nombre libre (venv-ocr, .env310...) se delata por
+    # su pyvenv.cfg: lo pillamos aunque el nombre no este en la lista
+    if low_name not in _BY_NAME and _self_marker_ok(_VENV_RULE, path):
+        return _VENV_RULE
     return None
 
 

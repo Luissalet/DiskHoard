@@ -222,3 +222,13 @@ def test_new_catalog_rules_are_wired():
     ids = {r["id"] for r in junkmod.RULES}
     for wanted in ("uv", "bun", "gomod", "pubcache", "lmstudio", "shadercache", "deliveryopt", "spotify"):
         assert wanted in ids, wanted
+
+
+def test_a_venv_with_any_name_is_recognised_by_its_pyvenv_cfg(tmp_path):
+    odd = tmp_path / "venv-ocr"
+    (odd / "Lib").mkdir(parents=True)
+    (odd / "pyvenv.cfg").write_text("home = x")
+    assert junkmod.match_rule(str(odd), "venv-ocr")["id"] == "venv"
+    plain = tmp_path / "datos"
+    plain.mkdir()
+    assert junkmod.match_rule(str(plain), "datos") is None
