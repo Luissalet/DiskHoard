@@ -232,3 +232,34 @@ def test_a_venv_with_any_name_is_recognised_by_its_pyvenv_cfg(tmp_path):
     plain = tmp_path / "datos"
     plain.mkdir()
     assert junkmod.match_rule(str(plain), "datos") is None
+
+
+# ----------------------------------------------------------------- familia
+
+def test_family_contract_bearer_token_health_block_and_call_events(server, monkeypatch):
+    """The hub proxy and the MCP bridge speak Authorization: Bearer; every call lands in the bus as agent.call."""
+    from diskhoard.hoard_link import family
+
+    h = get(server, "/api/health", auth=False)
+    assert h["hoard_link"]["app"] == "diskhoard" and h["hoard_link"]["family"] and "events" in h["hoard_link"]
+
+    seen = []
+    monkeypatch.setattr(family, "emit", lambda t, d=None, **kw: seen.append((t, d)) or True)
+
+    req = urllib.request.Request(server["url"] + "/api/agent/call", method="POST",
+                                 data=json.dumps({"name": "disk_drives", "arguments": {}, "caller": "hub"}).encode())
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + server["token"])
+    with urllib.request.urlopen(req, timeout=30) as r:
+        assert r.status == 200 and "drives" in json.loads(r.read())
+    assert seen and seen[-1][0] == "agent.call"
+    assert seen[-1][1]["tool"] == "disk_drives" and seen[-1][1]["ok"] is True and seen[-1][1]["caller"] == "hub" and "ms" in seen[-1][1]
+
+    bad = urllib.request.Request(server["url"] + "/api/agent/tools")
+    bad.add_header("Authorization", "Bearer not-the-token")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(bad, timeout=10)
+    assert exc.value.code == 403
+
+    call(server, "no_such_tool", expect=400)
+    assert seen[-1][1]["tool"] == "no_such_tool" and seen[-1][1]["ok"] is False and "unknown tool" in seen[-1][1]["error"]

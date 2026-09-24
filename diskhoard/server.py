@@ -19,6 +19,7 @@ from . import __version__
 from . import agent as agentmod
 from . import junk as junkmod
 from . import scanner as scanmod
+from .hoard_link import family
 from .winfs import (IS_WIN, delete_permanent, list_drives, long_path,
                     norm_display, send_to_trash)
 
@@ -478,7 +479,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _auth(self, qs):
-        tok = self.headers.get("X-DH-Token") or (qs.get("t", [""])[0])
+        """The UI sends ?t= or X-DH-Token; the family (hub proxy, MCP bridge) sends Authorization: Bearer."""
+        auth = self.headers.get("Authorization") or ""
+        bearer = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+        tok = self.headers.get("X-DH-Token") or bearer or (qs.get("t", [""])[0])
         return tok == TOKEN
 
     def do_GET(self):
@@ -553,7 +557,11 @@ class Handler(BaseHTTPRequestHandler):
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return self._json({"ok": True})
         if p == "/api/agent/call":
-            out, is_err = AGENT.call(body.get("name", ""), body.get("arguments") or {})
+            name = body.get("name", "")
+            t0 = time.time()
+            out, is_err = AGENT.call(name, body.get("arguments") or {})
+            family.record_call(name, not is_err, int((time.time() - t0) * 1000), caller=str(body.get("caller") or ""),
+                               error=str((out or {}).get("error") or "") if is_err else "")
             return self._json(out, 400 if is_err else 200)
         return self._json({"error": "endpoint desconocido"}, 404)
 
@@ -583,7 +591,8 @@ def api_health():
                 "size": sc.root.size if sc.done and not sc.error else None}
     return {"service": SERVICE, "name": "DiskHoard", "version": __version__,
             "status": "healthy", "port": ST.port, "uptime_s": round(time.time() - ST.started),
-            "scan": scan, "agent_calls": AGENT.seq, "tools": len(agentmod.CATALOG)}
+            "scan": scan, "agent_calls": AGENT.seq, "tools": len(agentmod.CATALOG),
+            "hoard_link": family.health_block()}
 
 
 def free_port(start=DEFAULT_PORT, span=60):
@@ -626,6 +635,7 @@ def serve(port=None, open_browser=False):
         port = free_port()
         if not port:
             raise OSError("No hay puertos libres a partir del %d" % DEFAULT_PORT)
+    family.configure("diskhoard", data_dir(), token_file=os.path.join(data_dir(), "mcp-token"))
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     srv.daemon_threads = True
     ST.port = srv.server_address[1]

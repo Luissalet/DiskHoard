@@ -146,6 +146,15 @@ seguro de `D:\proyectos`», «¿qué es esta carpeta?».
 La app también se puede arrancar a mano en el puerto que quieras:
 `python -m diskhoard --port 8817 --no-browser`. `/api/health` responde sin token.
 
+### En la familia (Hoard Hub)
+
+DiskHoard sigue el contrato de la familia de Hoards: `GET /api/agent/tools` y `POST /api/agent/call`
+aceptan también `Authorization: Bearer <data/mcp-token>` (lo que envían el proxy del Hoard Hub y los
+puentes MCP, además del `X-DH-Token` / `?t=` de la interfaz); `/api/health` lleva el bloque `hoard_link`;
+y cada llamada de agente se anota en el bus del hub como `agent.call` (`HOARD_EVENTS=0` lo silencia,
+`HOARD_HUB_URL` cambia el hub). La librería va vendida en `diskhoard/hoard_link/` (solo librería
+estándar, como el resto de la app) y se refresca con `scripts/sync_vendored.py` del repositorio del hub.
+
 ## Atajos
 
 | Tecla | Acción |
@@ -205,6 +214,7 @@ DiskHoard/
     ├── winfs.py           rutas largas, unidades, papelera, borrado
     ├── agent.py           catálogo de herramientas del agente y reglas de borrado
     ├── server.py          servidor HTTP local + API
+    ├── hoard_link/        librería de la familia (vendida): eventos al hub, bloque de salud
     └── web/index.html     interfaz entera en un fichero
 ```
 
