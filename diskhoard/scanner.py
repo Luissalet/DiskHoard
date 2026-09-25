@@ -93,6 +93,9 @@ class Scanner:
         self.ext_stats = {}       # ext -> [count, bytes]
         self.error_paths = []
 
+        self.on_done = None       # callable(scanner) cuando termina bien
+        self.from_snapshot = False  # cargado de disco al arrancar, no escaneado ahora
+
     # ------------------------------------------------------------------ ciclo
     def start(self):
         self.started = time.time()
@@ -125,12 +128,19 @@ class Scanner:
             _aggregate(self.root)
         self.finished = time.time()
         self.done = True
+        if not self._cancel and not self.error and self.on_done is not None:
+            try:
+                self.on_done(self)
+            except Exception:  # noqa: BLE001 - guardar la instantanea nunca tumba el escaneo
+                pass
 
     def progress(self):
         return {
             "done": self.done,
             "cancelled": self._cancel,
             "error": self.error,
+            "from_snapshot": self.from_snapshot,
+            "scanned_at": self.finished or None,
             "root": self.root_display,
             "files": self.p_files,
             "bytes": self.p_bytes,
@@ -276,6 +286,90 @@ def _aggregate(root: Node):
             if node.children:
                 for c in node.children.values():
                     stack.append((c, False))
+
+
+# ------------------------------------------------------------ instantanea
+
+SNAPSHOT_VERSION = 1
+
+
+def save_snapshot(sc: "Scanner", path: str) -> bool:
+    """Guarda el ultimo escaneo terminado (solo carpetas, como en memoria) en
+    un fichero comprimido, para que un reinicio no obligue a escanear otra
+    vez un disco entero. Escritura atomica: .tmp y os.replace."""
+    import gzip
+    import pickle
+
+    if not sc.done or sc.error:
+        return False
+    flat = []
+    stack = [sc.root]
+    while stack:
+        node = stack.pop()
+        kids = list(node.children.values()) if node.children else []
+        flat.append((node.name, node.size, node.own, node.nfiles, node.nown,
+                     node.mtime, node.flags, len(kids)))
+        stack.extend(reversed(kids))
+    payload = {
+        "version": SNAPSHOT_VERSION, "root": sc.root_display, "started": sc.started,
+        "finished": sc.finished, "counters": [sc.p_files, sc.p_bytes, sc.p_dirs, sc.p_errors],
+        "top_files": sc.top_files, "ext_stats": sc.ext_stats, "error_paths": sc.error_paths,
+        "nodes": flat,
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with gzip.open(tmp, "wb", compresslevel=3) as fh:
+        pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    return True
+
+
+def load_snapshot(path: str):
+    """El Scanner de una instantanea (done, from_snapshot=True), o None si no
+    hay fichero, es de otra version o la carpeta raiz ya no existe."""
+    import gzip
+    import pickle
+
+    try:
+        with gzip.open(path, "rb") as fh:
+            payload = pickle.load(fh)
+    except (OSError, EOFError, ValueError, pickle.UnpicklingError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != SNAPSHOT_VERSION:
+        return None
+    nodes = payload.get("nodes") or []
+    if not nodes or not os.path.isdir(long_path(payload["root"])):
+        return None
+    sc = Scanner(payload["root"])
+    it = iter(nodes)
+    parents = []  # [(node, hijos que faltan)]
+    root = None
+    for name, size, own, nfiles, nown, mtime, flags, nkids in it:
+        node = Node(name)
+        node.size, node.own, node.nfiles, node.nown = size, own, nfiles, nown
+        node.mtime, node.flags = mtime, flags
+        if root is None:
+            root = node
+        else:
+            parent = parents[-1]
+            if parent[0].children is None:
+                parent[0].children = {}
+            parent[0].children[name] = node
+            parent[1] -= 1
+            while parents and parents[-1][1] == 0:
+                parents.pop()
+        if nkids:
+            parents.append([node, nkids])
+    sc.root = root
+    sc.started = payload.get("started") or 0.0
+    sc.finished = payload.get("finished") or 0.0
+    sc.p_files, sc.p_bytes, sc.p_dirs, sc.p_errors = payload.get("counters") or (0, 0, 0, 0)
+    sc.top_files = [tuple(t) for t in payload.get("top_files") or []]
+    sc.ext_stats = payload.get("ext_stats") or {}
+    sc.error_paths = payload.get("error_paths") or []
+    sc.done = True
+    sc.from_snapshot = True
+    return sc
 
 
 # ------------------------------------------------------------------ utilidades

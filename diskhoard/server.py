@@ -75,6 +75,38 @@ ST = State()
 AGENT = agentmod.Agent(sys.modules[__name__])
 
 
+# ------------------------------------------------------------- instantanea
+
+def snapshot_path():
+    return os.path.join(data_dir(), "last-scan.pkl.gz")
+
+
+def _save_snapshot_async(sc):
+    """Guarda el escaneo en data/ sin bloquear a quien llama (un disco
+    entero son cientos de miles de carpetas)."""
+    def run():
+        try:
+            if ST.scanner is sc:
+                scanmod.save_snapshot(sc, snapshot_path())
+        except Exception:  # noqa: BLE001 - sin instantanea solo se pierde la comodidad
+            pass
+    threading.Thread(target=run, name="dh-snapshot", daemon=True).start()
+
+
+def restore_snapshot():
+    """Al arrancar: el ultimo escaneo guardado pasa a ser el actual, salvo
+    que alguien haya lanzado ya uno nuevo."""
+    sc = scanmod.load_snapshot(snapshot_path())
+    if sc is None:
+        return False
+    with ST.lock:
+        if ST.scanner is not None:
+            return False
+        ST.scanner = sc
+        ST.cache.clear()
+    return True
+
+
 # ------------------------------------------------------------------ arbol
 
 def _find_chain(root, root_path, target):
@@ -121,6 +153,7 @@ def _detach(path):
         anc.size -= node.size
         anc.nfiles -= node.nfiles
     ST.cache.clear()
+    _save_snapshot_async(sc)
     return node.size
 
 
@@ -138,6 +171,7 @@ def _detach_file(path, size):
         anc.size -= size
         anc.nfiles -= 1
     ST.cache.clear()
+    _save_snapshot_async(sc)
 
 
 # --------------------------------------------------------------- endpoints
@@ -165,6 +199,7 @@ def api_scan(path):
             ST.scanner.cancel()
         ST.cache.clear()
         sc = scanmod.Scanner(path)
+        sc.on_done = _save_snapshot_async
         ST.scanner = sc
     sc.start()
     return {"ok": True, "root": sc.root_display}
@@ -652,6 +687,8 @@ def serve(port=None, open_browser=False):
     except OSError:
         pass
     url = "%s/?t=%s" % (base, TOKEN)
+    if os.environ.get("DISKHOARD_RESTORE", "1") != "0":
+        threading.Thread(target=restore_snapshot, name="dh-restore", daemon=True).start()
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     return srv, url

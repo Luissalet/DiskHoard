@@ -24,6 +24,11 @@ Doble clic en `DiskHoard.bat`. Se abre el navegador en `127.0.0.1`.
 3. Navegas por niveles. Cada fila lleva su barra de peso, su tamaño, el porcentaje que se
    lleva de la carpeta actual, cuántos ficheros contiene y cuándo se tocó por última vez.
 
+El último escaneo terminado se guarda en `data/last-scan.pkl.gz` (solo carpetas, comprimido)
+y se carga al arrancar: tras un reinicio no hace falta volver a recorrer la unidad entera.
+Las herramientas del asistente avisan de su antigüedad (`snapshot.age_h`) y `disk_scan` lo
+refresca. `DISKHOARD_RESTORE=0` lo desactiva.
+
 `DiskHoard (admin).bat` hace lo mismo como administrador, para que no aparezcan carpetas
 del sistema marcadas como «sin permiso».
 

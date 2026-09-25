@@ -156,11 +156,15 @@ CATALOG = [
 ]
 
 TOOL_NAMES = [t["name"] for t in CATALOG]
+# Tools that read the scanned tree: their answer says when it comes from a scan saved before a restart.
+SNAPSHOT_TOOLS = {"disk_status", "disk_dir", "disk_hotspots", "disk_junk", "disk_stale", "disk_top_files",
+                  "disk_types", "disk_find"}
 
 INSTRUCTIONS = (
     "DiskHoard measures what fills the user's disks and knows which folders are regenerable junk. "
-    "Start with disk_drives, then disk_scan on the drive or folder the user cares about, then read "
-    "disk_hotspots and disk_junk. Quote sizes in GB with one decimal. Before any disk_delete, list "
+    "Start with disk_drives and disk_status: the last scan is kept across restarts, so when it already covers "
+    "the drive the user asks about, read it (and say how old it is) instead of scanning again; otherwise "
+    "disk_scan that drive or folder. Then read disk_hotspots and disk_junk. Quote sizes in GB with one decimal. Before any disk_delete, list "
     "the exact paths and their safety level to the user; use mode='permanent' only when they ask for it "
     "explicitly. When unsure, hand them a disk_script instead."
 )
@@ -273,6 +277,15 @@ class Agent:
         except Exception as exc:  # noqa: BLE001 - el agente debe recibir el error, no un 500
             return {"error": "%s: %s" % (type(exc).__name__, exc)}, True
         is_err = isinstance(out, dict) and bool(out.get("error"))
+        sc = self.srv.ST.scanner
+        if (not is_err and isinstance(out, dict) and name in SNAPSHOT_TOOLS
+                and sc is not None and getattr(sc, "from_snapshot", False)):
+            out["snapshot"] = {
+                "scanned_at": _day(sc.finished) if sc.finished else None,
+                "age_h": round((time.time() - sc.finished) / 3600.0, 1) if sc.finished else None,
+                "hint": "Tree from the last saved scan of %s (kept across restarts); "
+                        "say how old it is, and call disk_scan when the user wants fresh numbers." % sc.root_display,
+            }
         return out, is_err
 
     # ---- lo que hay que tener
