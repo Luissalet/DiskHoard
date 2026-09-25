@@ -57,8 +57,10 @@ def test_health_needs_no_token_and_names_the_service(server):
 
 
 def test_agent_endpoints_need_the_token(server):
+    # The catalogue is public (as in every family app); the log and the calls are not.
+    assert [t["name"] for t in get(server, "/api/agent/tools", auth=False)["tools"]] == agentmod.TOOL_NAMES
     with pytest.raises(urllib.error.HTTPError) as exc:
-        get(server, "/api/agent/tools", auth=False)
+        get(server, "/api/agent/log", auth=False)
     assert exc.value.code == 403
     cat = get(server, "/api/agent/tools")
     assert [t["name"] for t in cat["tools"]] == agentmod.TOOL_NAMES
@@ -255,7 +257,7 @@ def test_family_contract_bearer_token_health_block_and_call_events(server, monke
     assert seen and seen[-1][0] == "agent.call"
     assert seen[-1][1]["tool"] == "disk_drives" and seen[-1][1]["ok"] is True and seen[-1][1]["caller"] == "hub" and "ms" in seen[-1][1]
 
-    bad = urllib.request.Request(server["url"] + "/api/agent/tools")
+    bad = urllib.request.Request(server["url"] + "/api/agent/log")
     bad.add_header("Authorization", "Bearer not-the-token")
     with pytest.raises(urllib.error.HTTPError) as exc:
         urllib.request.urlopen(bad, timeout=10)

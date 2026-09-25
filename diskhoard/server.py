@@ -491,6 +491,11 @@ class Handler(BaseHTTPRequestHandler):
         p = u.path
         if p == "/api/health":
             return self._json(api_health())
+        if p == "/api/agent/tools":
+            # The catalogue is public in every family app (the hub and the workspace list it
+            # before they hold a token); calling a tool still needs the token.
+            return self._json({"tools": agentmod.CATALOG, "instructions": agentmod.INSTRUCTIONS,
+                               "service": SERVICE, "version": __version__})
         if p.startswith("/api/"):
             if not self._auth(qs):
                 return self._json({"error": "token invalido"}, 403)
