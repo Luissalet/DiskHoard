@@ -233,6 +233,26 @@ def refuse_reason(path):
         parts = stripped.replace("/", "\\").split("\\")
         if any(part.lower() in (".git",) for part in parts[:-1]):
             return "lives inside a Git repository's metadata"
+        # A parent directory can hide protected descendants. Check the tree
+        # before handing it to the asynchronous deleter, which removes it whole.
+        if not os.path.islink(long_path(p)):
+            errors = []
+
+            def unreadable(exc):
+                errors.append(exc)
+
+            for root, dirs, _files in os.walk(long_path(p), onerror=unreadable):
+                if errors:
+                    return "cannot inspect every descendant before deletion"
+                for child in dirs:
+                    candidate = os.path.join(root, child)
+                    if os.path.islink(candidate):
+                        continue
+                    child_rule = junkmod.match_rule(norm_display(candidate), child)
+                    if child_rule is not None and child_rule["safety"] == junkmod.DANGER:
+                        return "contains a protected folder (%s)" % child_rule["label"]
+            if errors:
+                return "cannot inspect every descendant before deletion"
     elif name in junkmod.FILE_NOTES:
         return "a system file (%s)" % junkmod.FILE_NOTES[name][0]
     return None

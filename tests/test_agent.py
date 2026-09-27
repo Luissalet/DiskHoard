@@ -172,6 +172,8 @@ def test_refusals(server, tree):
     assert agentmod.refuse_reason("/" if os.name != "nt" else "C:\\")
     assert agentmod.refuse_reason(str(tree / "proyecto" / ".git"))
     assert agentmod.refuse_reason(str(tree / "proyecto" / ".git" / "objects"))
+    assert "protected folder" in agentmod.refuse_reason(str(tree / "proyecto"))
+    assert "protected folder" in agentmod.refuse_reason(str(tree))
     assert agentmod.refuse_reason(str(tree / "proyecto" / "node_modules")) is None
     assert agentmod.refuse_reason("relativa/ruta")
 
@@ -184,6 +186,15 @@ def test_permanent_needs_confirm_and_refuses_danger(server, tree):
                                        "mode": "permanent", "confirm": True}, expect=400)
     assert out["refused"][0]["reason"].startswith("marked")
     assert os.path.isdir(str(tree / "proyecto" / ".git"))
+
+
+def test_parent_of_protected_folder_cannot_be_deleted(server, tree):
+    parent = str(tree / "proyecto")
+    out = call(server, "disk_delete", {"paths": [parent], "mode": "permanent",
+                                       "confirm": True}, expect=400)
+    assert out["refused"][0]["path"] == os.path.abspath(parent)
+    assert "protected folder" in out["refused"][0]["reason"]
+    assert os.path.isfile(str(tree / "proyecto" / ".git" / "objects" / "pack" / "x.pack"))
 
 
 def test_permanent_delete_updates_the_tree(server, tree):
