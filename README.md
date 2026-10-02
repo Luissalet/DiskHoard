@@ -56,3 +56,12 @@ HTTP: `POST /api/zip/plan`, `POST /api/zip/split`, `GET /api/zip/job?id=`, `POST
 | `disk_zip_status`, `disk_zip_cancel` | Follow or cancel the ZIP job; a cancel leaves no half-written part. |
 
 See [the Spanish README](README.es.md) for the full rule catalogue and examples.
+
+## Shared commons (Hoard Link)
+
+`diskhoard/hoard_link/` is the vendored Hoard Link library (standard library only). DiskHoard takes from it the
+request guard (`guard.check_request`: loopback Host, Origin and Fetch Metadata rules on every request; set
+`DISKHOARD_ALLOWED_HOSTS` to open a LAN or tailnet name on purpose), the stable MCP token
+(`tokens.read_or_create_token`, `data/mcp-token`), the Windows-safe replace with retries for the last-scan snapshot and
+the ZIP parts (`atomic.replace_with_retry`), the "show in file manager" action (`proc.reveal_in_file_manager`), and the
+family contract (`GET /api/agent/tools`, `POST /api/agent/call` with the bearer token, `agent.call` events).

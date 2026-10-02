@@ -206,6 +206,11 @@ puentes MCP, además del `X-DH-Token` / `?t=` de la interfaz); `/api/health` lle
 y cada llamada de agente se anota en el bus del hub como `agent.call` (`HOARD_EVENTS=0` lo silencia,
 `HOARD_HUB_URL` cambia el hub). La librería va vendida en `diskhoard/hoard_link/` (solo librería
 estándar, como el resto de la app) y se refresca con `scripts/sync_vendored.py` del repositorio del hub.
+De ella salen también la guardia de peticiones (`guard.check_request`: Host, Origin y Fetch Metadata en
+cada petición, `DISKHOARD_ALLOWED_HOSTS` abre un nombre de red local a propósito), el token
+(`tokens.read_or_create_token`), el reemplazo atómico con reintentos en Windows de la instantánea del
+último escaneo y de las partes ZIP (`atomic.replace_with_retry`) y el botón «abrir en el explorador»
+(`proc.reveal_in_file_manager`).
 
 ## Atajos
 
@@ -267,7 +272,7 @@ DiskHoard/
     ├── agent.py           catálogo de herramientas del agente y reglas de borrado
     ├── zipsplit.py        partir carpetas en ZIPs con límite garantizado (lógica pura)
     ├── server.py          servidor HTTP local + API
-    ├── hoard_link/        librería de la familia (vendida): eventos al hub, bloque de salud
+    ├── hoard_link/        librería de la familia (vendida): guardia de peticiones, token, escritura atómica, explorador, eventos al hub, bloque de salud
     └── web/index.html     interfaz entera en un fichero
 ```
 
