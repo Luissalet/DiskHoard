@@ -17,6 +17,7 @@ import threading
 import time
 from collections import deque
 
+from .hoard_link.atomic import replace_with_retry
 from .winfs import IS_WIN, long_path, norm_display
 
 TOP_FILES = 500
@@ -320,7 +321,7 @@ def save_snapshot(sc: "Scanner", path: str) -> bool:
     tmp = path + ".tmp"
     with gzip.open(tmp, "wb", compresslevel=3) as fh:
         pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(tmp, path)
+    replace_with_retry(tmp, path)  # Windows: waits out a UI poll or a virus scan holding the old snapshot
     return True
 
 

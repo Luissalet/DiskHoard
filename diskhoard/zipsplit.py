@@ -27,6 +27,7 @@ import zipfile
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
+from .hoard_link.atomic import replace_with_retry
 from .winfs import IS_WIN, long_path, norm_display, strip_long
 
 # --------------------------------------------------------------------- tamaños
@@ -588,7 +589,7 @@ class _VolumeWriter:
         self.close()
         out = []
         for tmp, final in self.volumes:
-            os.replace(long_path(tmp), long_path(final))
+            replace_with_retry(long_path(tmp), long_path(final))
             out.append((final, os.path.getsize(long_path(final))))
         return out
 
@@ -744,7 +745,7 @@ def split(o, should_stop=None, progress=None, confirm=False):
             state["writer"] = None
             raise ZipSplitError("Error interno: %s ocupa %s y pasa el límite (%s)." % (
                 os.path.basename(w["final"]), human(size), human(o.limit)))
-        os.replace(long_path(w["tmp"]), long_path(w["final"]))
+        replace_with_retry(long_path(w["tmp"]), long_path(w["final"]))
         written.add(os.path.basename(w["final"]).lower())
         summary["parts"].append({
             "n": w["n"], "name": os.path.basename(w["final"]), "path": w["final"], "kind": "zip",
