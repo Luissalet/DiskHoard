@@ -107,8 +107,8 @@ header{display:flex;align-items:center;gap:10px;padding:8px 12px;min-width:0;
 .tab b{color:var(--dim);font-weight:400;margin-left:5px;font-size:11px}
 .crumbbar{display:flex;align-items:center;gap:10px;padding-right:12px;
   border-bottom:1px solid var(--line);background:var(--hoard-sunken)}
-.crumbbar #btnRescanDir{flex:0 0 auto;font-size:12px;padding:3px 9px;color:var(--mut)}
-.crumbbar #btnRescanDir:hover{color:var(--tx)}
+.crumbbar #btnRescanDir,.crumbbar #btnZipDir{flex:0 0 auto;font-size:12px;padding:3px 9px;color:var(--mut)}
+.crumbbar #btnRescanDir:hover,.crumbbar #btnZipDir:hover{color:var(--tx)}
 .crumbs{display:flex;align-items:center;gap:2px;padding:7px 12px;flex-wrap:wrap;
   flex:1;min-width:0;font-size:12.5px}
 .crumbs a{color:var(--mut);text-decoration:none;padding:2px 6px;border-radius:5px;
@@ -208,6 +208,34 @@ td.selcell:hover{background:var(--hoard-elevated);box-shadow:inset 2px 0 0 var(-
   opacity:0;pointer-events:none;transition:.18s}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* ---------- partir en ZIPs ---------- */
+#zipsec{flex:1;display:none;flex-direction:column;min-height:0}
+#zipsec .zbody{flex:1;overflow:auto;padding:22px 24px 40px}
+.zwrap{max-width:980px;margin:0 auto}
+.zwrap h2{font-family:var(--hoard-font-serif);font-size:22px;margin:0 0 4px}
+.zgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 16px;margin-top:14px}
+.zgrid label,.zrow label{display:block;color:var(--mut);font-size:11.5px;margin-bottom:3px}
+.zgrid input,.zgrid select,.zrow input{width:100%}
+.zrow{margin-top:14px}
+.zrow .pathrow{margin-top:0}
+.zquick{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.zquick button{padding:2px 10px;font-size:11.5px;border-radius:999px}
+.zquick button.on{border-color:var(--acc);color:var(--acc)}
+.zchk{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--mut)}
+.zchk label{display:flex;align-items:center;gap:6px;margin:0;color:var(--mut);font-size:12.5px}
+.zchk input{width:auto}
+.zbtns{display:flex;gap:9px;margin-top:16px;flex-wrap:wrap}
+.zbar{height:10px;background:var(--hoard-sunken);border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-top:8px}
+.zbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--hoard-accent-dim),var(--hoard-accent));transition:width .25s}
+.zres{margin-top:18px}
+.zres table td,.zres table th{white-space:normal}
+.zres td.n,.zres th.n{text-align:right}
+.zfill{height:8px;background:var(--hoard-sunken);border-radius:4px;overflow:hidden;min-width:70px}
+.zfill i{display:block;height:100%;background:linear-gradient(90deg,var(--hoard-accent-dim),var(--hoard-accent))}
+.zcur{color:var(--dim);font-family:Consolas,monospace;font-size:11.5px;margin-top:6px;word-break:break-all}
+.zjoin{font-family:Consolas,monospace;font-size:11.5px;background:var(--hoard-sunken);border:1px solid var(--line);
+  border-radius:6px;padding:6px 9px;margin:4px 0 8px;word-break:break-all;user-select:all}
+
 /* modal */
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.66);display:none;z-index:50;
   align-items:center;justify-content:center;padding:22px}
@@ -262,6 +290,9 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
     <div class="sect">Atajos</div>
     <div class="chips" id="quick"></div>
 
+    <div class="sect">Herramientas</div>
+    <div class="chips"><div class="chip" id="zOpenStart">Partir una carpeta en ZIPs <span class="dim">para webs con límite por fichero</span></div></div>
+
     <div class="sect">O una carpeta concreta</div>
     <div class="pathrow">
       <input id="pathin" placeholder="C:\Users\luism\Desktop" spellcheck="false">
@@ -305,10 +336,12 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
       <div class="tab" data-t="files">Ficheros grandes</div>
       <div class="tab" data-t="types">Por tipo</div>
       <div class="tab" data-t="stale">Sin tocar</div>
+      <div class="tab" data-t="zip" id="tabZip">Partir en ZIPs</div>
     </div>
 
     <div class="crumbbar">
       <div class="crumbs" id="crumbs"></div>
+      <button id="btnZipDir" class="ghost" title="Parte esta carpeta en ZIPs que no pasen de un tamaño">Partir en ZIPs…</button>
       <button id="btnRescanDir" class="ghost"
         title="Vuelve a leer solo esta carpeta y actualiza los totales. Rápido.">⟳ esta carpeta</button>
     </div>
@@ -329,10 +362,71 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
       <button id="bOpen">Abrir en el explorador</button>
       <button id="bCopy">Copiar rutas</button>
       <button id="bScript">Generar script</button>
+      <button id="bZip" title="Parte la carpeta seleccionada en ZIPs">Partir en ZIPs…</button>
       <button class="danger" id="bPerm">Borrar definitivamente</button>
       <button class="primary" id="bTrash">Mover a la papelera</button>
       <button class="ghost" id="bClear">✕</button>
     </div>
+  </section>
+
+  <!-- ============ PARTIR EN ZIPS ============ -->
+  <section id="zipsec">
+    <header>
+      <div class="brand">Disk<span>Hoard</span></div>
+      <b>Partir en ZIPs</b>
+      <div style="flex:1"></div>
+      <button id="zBack">← Volver</button>
+    </header>
+    <div class="zbody"><div class="zwrap">
+      <h2>Partir en ZIPs</h2>
+      <p class="mut" style="margin:0">Convierte una carpeta en part_001.zip, part_002.zip… y ninguno pasa del límite
+      (para webs que limitan el tamaño por fichero). Se conserva la estructura de carpetas y se mide el tamaño real de cada parte.</p>
+
+      <div class="zrow"><label for="zSrc">Carpeta origen</label>
+        <div class="pathrow"><input id="zSrc" placeholder="D:\Fotos" spellcheck="false"></div></div>
+      <div class="zrow"><label for="zOut">Carpeta destino <span class="dim">(vacía o nueva; nunca dentro del origen)</span></label>
+        <div class="pathrow"><input id="zOut" placeholder="Por defecto: &lt;origen&gt;_zips" spellcheck="false"></div></div>
+
+      <div class="zgrid">
+        <div><label for="zLimit">Límite por ZIP</label><input id="zLimit" value="990mb" spellcheck="false">
+          <div class="zquick" id="zQuick">
+            <button data-v="25mb">25 MB correo</button><button data-v="100mb">100 MB</button>
+            <button data-v="500mb">500 MB</button><button data-v="990mb">990 MB</button>
+            <button data-v="2gb">2 GB</button><button data-v="4gb">4 GB</button></div></div>
+        <div><label for="zMargin">Margen</label><input id="zMargin" value="5mb" spellcheck="false"></div>
+        <div><label for="zPrefix">Prefijo</label><input id="zPrefix" value="part" spellcheck="false"></div>
+        <div><label for="zSort">Orden</label><select id="zSort">
+          <option value="name">Por nombre</option><option value="size">Por tamaño (pequeños primero)</option></select></div>
+        <div><label for="zComp">Compresión</label><select id="zComp">
+          <option value="stored">Sin comprimir (tamaños exactos)</option><option value="deflated">Deflate (menos espacio)</option></select></div>
+        <div><label for="zBig">Ficheros mayores que el límite</label><select id="zBig">
+          <option value="skip">Saltarlos</option><option value="split">Partir en volúmenes (.zip.001, .002…)</option>
+          <option value="move">Moverlos a too_large/</option><option value="fail">Fallar y no empezar</option></select></div>
+        <div><label for="zInc">Solo incluir <span class="dim">(patrones, vacío = todo)</span></label>
+          <input id="zInc" placeholder="*.jpg, *.png" spellcheck="false"></div>
+        <div><label for="zExc">Excluir <span class="dim">(patrones)</span></label>
+          <input id="zExc" value="Thumbs.db, desktop.ini, .DS_Store, *.tmp, ~$*" spellcheck="false"></div>
+      </div>
+      <div class="zchk">
+        <label><input type="checkbox" id="zManifest" checked> Escribir manifest.txt</label>
+        <label><input type="checkbox" id="zOver"> Sobrescribir partes anteriores con el mismo prefijo</label>
+      </div>
+      <div class="note">Unidades: kb/mb/gb son decimales (1 MB = 1.000.000 bytes, lo que cuentan las webs); kib/mib/gib son binarias.
+        Con «Sin comprimir» el plan coincide con el resultado; con Deflate es un máximo.</div>
+
+      <div class="zbtns">
+        <button id="zPlan">Calcular plan</button>
+        <button class="primary" id="zRun">Crear ZIPs</button>
+        <button class="danger" id="zCancel" style="display:none">Cancelar</button>
+      </div>
+
+      <div id="zProg" style="display:none;margin-top:16px">
+        <div id="zProgTxt"></div>
+        <div class="zbar"><i id="zProgBar"></i></div>
+        <div class="zcur" id="zProgCur"></div>
+      </div>
+      <div class="zres" id="zRes"></div>
+    </div></div>
   </section>
 </div>
 
@@ -408,7 +502,7 @@ async function boot() {
   $('#quick').innerHTML = d.quick.map(q =>
     `<div class="chip" data-p="${esc(q.path)}">${esc(q.label)} <span class="dim">${esc(q.path)}</span></div>`).join('');
   $('#pathin').value = d.quick.length ? d.quick[0].path : 'C:\\';
-  $$('.drive, .chip').forEach(el => el.onclick = () => scan(el.dataset.p));
+  $$('.drive[data-p], .chip[data-p]').forEach(el => el.onclick = () => scan(el.dataset.p));
 }
 $('#goPath').onclick = () => scan($('#pathin').value.trim());
 $('#pathin').onkeydown = e => { if (e.key === 'Enter') scan($('#pathin').value.trim()); };
@@ -584,6 +678,8 @@ function selAdd(e) { S.sel.set(e.path, e); updateSel(); }
 function updateSel() {
   const n = S.sel.size;
   $('#selbar').classList.toggle('on', n > 0);
+  const only = n === 1 ? Array.from(S.sel.values())[0] : null;
+  $('#bZip').disabled = !(only && only.dir);
   if (!n) return;
   let tot = 0, danger = 0;
   S.sel.forEach(v => { tot += v.size || 0; if (v.tag && v.tag.safety === 'danger') danger++; });
@@ -594,6 +690,7 @@ $('#bClear').onclick = () => { S.sel.clear(); renderExplorer(); updateSel(); };
 
 /* ================= pestañas ================= */
 $$('.tab').forEach(t => t.onclick = () => {
+  if (t.dataset.t === 'zip') { openZip('main', S.path); return; }
   showTab(t.dataset.t);
   if (S.tab === 'hot') renderHot();
   if (S.tab === 'junk') renderJunk();
@@ -941,6 +1038,161 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ================= partir en ZIPs ================= */
+const Z = {from: 'start', job: null, timer: null, auto: true};
+const zv = id => document.getElementById(id);
+function zh(n) {                      // decimal, como cuentan las webs (1 MB = 1.000.000 bytes)
+  n = n || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (n >= 1000 && i < 4) { n /= 1000; i++; }
+  return (i ? n.toFixed(2) : String(Math.round(n))).replace('.', ',') + ' ' + u[i];
+}
+function zDefaultOut(src) {
+  src = (src || '').trim().replace(/[\\/]+$/, '');
+  return !src || /^[A-Za-z]:$/.test(src) ? '' : src + '_zips';
+}
+function zSyncOut() { if (Z.auto) zv('zOut').value = zDefaultOut(zv('zSrc').value); }
+function zMarkQuick() {
+  const v = zv('zLimit').value.trim().toLowerCase().replace(/\s+/g, '');
+  $$('#zQuick button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+}
+async function openZip(from, src) {
+  Z.from = from;
+  $('#start').style.display = 'none'; $('#main').style.display = 'none';
+  zv('zipsec').style.display = 'flex';
+  if (src) { zv('zSrc').value = src; Z.auto = true; zSyncOut(); }
+  zMarkQuick();
+  const j = await get('/api/zip/job');           // si ya hay un trabajo en marcha (p. ej. lo lanzó el agente), se engancha
+  if (j && j.running && !Z.timer) { Z.job = j.id; zSetRunning(true); zPoll(); }
+}
+function closeZip() {
+  zv('zipsec').style.display = 'none';
+  if (Z.from === 'main') $('#main').style.display = 'flex'; else $('#start').style.display = 'block';
+}
+zv('zOpenStart').onclick = () => openZip('start');
+zv('btnZipDir').onclick = () => openZip('main', S.path);
+zv('bZip').onclick = () => { const v = Array.from(S.sel.values())[0]; if (v && v.dir) openZip('main', v.path); };
+zv('zBack').onclick = closeZip;
+zv('zSrc').oninput = zSyncOut;
+zv('zOut').oninput = () => { Z.auto = !zv('zOut').value.trim(); if (Z.auto) zSyncOut(); };
+zv('zLimit').oninput = zMarkQuick;
+$$('#zQuick button').forEach(b => b.onclick = () => { zv('zLimit').value = b.dataset.v; zMarkQuick(); });
+
+function zArgs() {
+  return {path: zv('zSrc').value.trim(), out_dir: zv('zOut').value.trim(), limit: zv('zLimit').value.trim(),
+          margin: zv('zMargin').value.trim(), prefix: zv('zPrefix').value.trim(), sort: zv('zSort').value,
+          compression: zv('zComp').value, too_large: zv('zBig').value, include: zv('zInc').value,
+          exclude: zv('zExc').value, manifest: zv('zManifest').checked, overwrite: zv('zOver').checked};
+}
+// Si el servidor pide confirmación (mover ficheros, unidad entera) se la pedimos a la persona y se repite.
+async function zCall(path, args) {
+  let r = await post(path, args);
+  if (r.error && /confirm=true|confirmarlo/.test(r.error)) {
+    const msg = r.error.replace(/\s*Hace falta confirmarlo \(confirm=true\)\./, '').replace(/:?\s*hace falta confirm=true\./, '.');
+    if (!window.confirm(msg + '\n\n¿Continuar?')) return {error: 'Cancelado.'};
+    r = await post(path, Object.assign({}, args, {confirm: true}));
+  }
+  return r;
+}
+function zWarn(msg) { zv('zRes').innerHTML = `<div class="warn">${esc(msg)}</div>`; }
+const Z_ACT = {skip: 'se salta', fail: 'hace fallar', move: 'se mueve a too_large/', split: 'se parte en volúmenes',
+               skipped: 'saltado', moved: 'movido', split_done: 'partido'};
+
+function zRenderPlan(r) {
+  const rows = r.parts.map(p => `<tr>
+    <td class="mono">${esc(p.name)}</td><td class="n">${fn(p.file_count)}</td>
+    <td class="n"><b>${zh(p.est_size)}</b></td>
+    <td><div class="zfill"><i style="width:${Math.min(100, p.fill_pct)}%"></i></div></td>
+    <td class="dim" style="font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.sample || []).join(', '))}</td></tr>`).join('');
+  const big = r.too_large.map(t => `<tr><td class="mono" style="word-break:break-all">${esc(t.path)}</td>
+    <td class="n"><b>${zh(t.size)}</b></td>
+    <td>${esc(Z_ACT[t.action] || t.action)}${t.volumes_estimate ? ' · ~' + t.volumes_estimate + ' volúmenes' : ''}</td></tr>`).join('');
+  return `<div class="kpis" style="padding:0">
+      <div class="kpi"><div class="v">${fn(r.part_count)}</div><div class="l">ZIPs (límite ${zh(r.limit)}, efectivo ${zh(r.effective_limit)})</div></div>
+      <div class="kpi"><div class="v">${fn(r.files)}</div><div class="l">ficheros · ${zh(r.bytes)}</div></div>
+      <div class="kpi"><div class="v">${fn(r.too_large_count)}</div><div class="l">mayores que el límite</div></div>
+      <div class="kpi"><div class="v">${fn(r.excluded)}</div><div class="l">excluidos por patrón</div></div></div>
+    ${r.warning ? `<div class="warn" style="margin-top:12px">${esc(r.warning)}</div>` : ''}
+    ${r.note ? `<div class="ok" style="margin-top:12px">${esc(r.note)}</div>` : ''}
+    ${r.unreadable_count ? `<div class="ok" style="margin-top:12px">${fn(r.unreadable_count)} entradas sin permiso de lectura no se incluirán.</div>` : ''}
+    <div class="sect">Plan · destino ${esc(r.out_dir)}</div>
+    ${rows ? `<table style="table-layout:auto"><thead><tr><th>Parte</th><th class="n">Ficheros</th>
+      <th class="n">${r.estimate === 'exact' ? 'Tamaño' : 'Máximo'}</th><th style="width:140px">Relleno</th><th>Empieza con</th></tr></thead>
+      <tbody>${rows}</tbody></table>` : '<div class="empty">No hay ficheros que empaquetar.</div>'}
+    ${big ? `<div class="sect">Mayores que el límite</div><table style="table-layout:auto"><thead><tr><th>Fichero</th>
+      <th class="n">Tamaño</th><th>Qué pasará</th></tr></thead><tbody>${big}</tbody></table>` : ''}`;
+}
+
+zv('zPlan').onclick = async () => {
+  zv('zRes').innerHTML = '<div class="empty">Calculando…</div>';
+  const r = await zCall('/api/zip/plan', zArgs());
+  if (r.error) { zWarn(r.error); return; }
+  zv('zRes').innerHTML = zRenderPlan(r);
+};
+
+function zSetRunning(on) {
+  zv('zRun').disabled = on; zv('zPlan').disabled = on;
+  zv('zCancel').style.display = on ? '' : 'none';
+  zv('zProg').style.display = on ? 'block' : zv('zProg').style.display;
+}
+zv('zRun').onclick = async () => {
+  zv('zRes').innerHTML = '';
+  const r = await zCall('/api/zip/split', zArgs());
+  if (r.error) { zWarn(r.error); return; }
+  Z.job = r.job; zSetRunning(true); zPoll();
+};
+zv('zCancel').onclick = async () => { zv('zCancel').disabled = true; await post('/api/zip/cancel', {id: Z.job}); };
+
+const Z_PHASE = {queued: 'En cola', scanning: 'Leyendo la carpeta', writing: 'Escribiendo ZIPs',
+                 splitting: 'Partiendo un fichero grande en volúmenes', done: 'Hecho', cancelled: 'Cancelado'};
+async function zPoll() {
+  clearTimeout(Z.timer); Z.timer = null;
+  const j = await get('/api/zip/job', {id: Z.job});
+  if (j.error && !j.state) { zSetRunning(false); zWarn(j.error); return; }
+  const pc = Math.max(0, Math.min(100, j.percent || 0));
+  zv('zProg').style.display = 'block';
+  zv('zProgBar').style.width = pc + '%';
+  zv('zProgTxt').innerHTML = `<b>${esc(Z_PHASE[j.phase] || j.phase || '')}</b> · ${j.part ? 'parte ' + j.part + ' · ' : ''}${pc.toFixed(1).replace('.', ',')}%
+    · ${zh(j.bytes_done)} de ${zh(j.bytes_total)} · ${fn(j.files_done)} de ${fn(j.files_total)} ficheros · ${ftime(j.elapsed_s)}`;
+  zv('zProgCur').textContent = j.current || '';
+  if (!j.finished) { Z.timer = setTimeout(zPoll, 500); return; }
+  zSetRunning(false); zv('zCancel').disabled = false;
+  zv('zProg').style.display = 'none';
+  if (j.state === 'error') { zWarn(j.error || 'El trabajo ha fallado.'); return; }
+  zRenderDone(j.summary);
+}
+
+function zRenderDone(r) {
+  const rows = r.parts.map(p => `<tr><td class="mono">${esc(p.name)}</td><td class="n">${fn(p.files)}</td>
+    <td class="n"><b>${zh(p.size)}</b></td>
+    <td><div class="zfill"><i style="width:${Math.min(100, p.fill_pct)}%"></i></div></td>
+    <td>${p.within_limit ? '<span class="badge b-safe">dentro del límite</span>' : '<span class="badge b-danger">pasa del límite</span>'}</td></tr>`).join('');
+  const big = r.too_large.map(t => {
+    const vols = (t.volumes || []).map(v => `<div class="mono">${esc(v.name)} <span class="mut">${zh(v.size)}</span></div>`).join('');
+    const join = t.join_windows ? `<div class="dim" style="font-size:11.5px;margin-top:4px">Para unirlos en Windows (o abre el .001 con 7-Zip):</div>
+      <div class="zjoin">${esc(t.join_windows)}</div>` : '';
+    return `<tr><td class="mono" style="word-break:break-all">${esc(t.path)}</td><td class="n"><b>${zh(t.size)}</b></td>
+      <td>${esc(Z_ACT[t.result === 'split' ? 'split_done' : t.result] || t.result)}${vols}${join}
+      ${t.moved_to ? `<div class="mono dim">${esc(t.moved_to)}</div>` : ''}</td></tr>`;
+  }).join('');
+  const msgs = (r.warnings || []).map(w => `<div class="ok">${esc(w)}</div>`).join('') +
+               (r.errors || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
+  zv('zRes').innerHTML = `
+    <div class="${r.cancelled ? 'warn' : 'ok'}" style="margin-top:4px">${r.cancelled
+      ? '<b>Cancelado.</b> Las partes ya cerradas se quedan; la que estaba a medias se ha borrado.'
+      : r.message ? esc(r.message) : '<b>Hecho.</b>'}
+      ${r.part_count ? ` ${fn(r.part_count)} ZIP${r.part_count > 1 ? 's' : ''}, ${fn(r.files_added)} ficheros, ${zh(r.bytes_out)} en total, en ${ftime(r.elapsed_s)}.` : ''}</div>
+    <div class="zbtns" style="margin:8px 0 4px"><button class="primary" id="zOpenOut">Abrir carpeta</button>
+      ${r.manifest ? '<span class="mut" style="align-self:center">Lista completa en manifest.txt</span>' : ''}</div>
+    ${msgs}
+    ${rows ? `<div class="sect">ZIPs creados · ${esc(r.out_dir)}</div>
+      <table style="table-layout:auto"><thead><tr><th>Parte</th><th class="n">Ficheros</th><th class="n">Tamaño real</th>
+      <th style="width:140px">Relleno</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+    ${big ? `<div class="sect">Ficheros mayores que el límite</div><table style="table-layout:auto"><thead><tr><th>Fichero</th>
+      <th class="n">Tamaño</th><th>Resultado</th></tr></thead><tbody>${big}</tbody></table>` : ''}`;
+  const open = zv('zOpenOut');
+  if (open) open.onclick = () => post('/api/open', {path: r.out_dir});
+}
+
 boot();
 
 /* ================= agente (MCP) =================
@@ -969,6 +1221,7 @@ async function agentPoll() {
   AG.timer = setTimeout(agentPoll, 2500);
 }
 async function followAgent() {
+  if ($('#zipsec').style.display === 'flex') return;   // no le quitamos la pantalla a quien está partiendo ZIPs
   const p = await get('/api/progress');
   if (p.idle) return;
   const scanningOn = $('#scanning').style.display === 'flex';

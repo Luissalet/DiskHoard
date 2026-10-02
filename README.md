@@ -2,7 +2,7 @@
 
 [Español](README.es.md)
 
-A local disk explorer and cleaner for Windows. Scan a drive or folder, see **where the space actually goes**, browse folder sizes by level and clean from the interface. It uses Python's standard library and a browser; its MCP stdio server lets Faustus or another assistant use the same scan and cleanup tools.
+A local disk explorer and cleaner for Windows. Scan a drive or folder, see **where the space actually goes**, browse folder sizes by level, clean from the interface and split a folder into ZIPs that each stay under a size limit. It uses Python's standard library and a browser; its MCP stdio server lets Faustus or another assistant use the same scan and cleanup tools.
 
 ![Explorer](docs/explorador.jpg)
 
@@ -30,9 +30,21 @@ Choose **Move to Recycle Bin**, **Delete permanently** or **Generate script**. T
 
 The assistant can never delete drive roots, the user profile and main folders, Windows, Program Files, ProgramData or other protected targets. The MCP layer applies the same rules as the UI.
 
+## Split into ZIPs
+
+The **Split into ZIPs** panel (the "Partir en ZIPs" tab, the start-screen button, and the buttons on the folder bar and selection bar) turns a folder into `part_001.zip`, `part_002.zip`... where no part exceeds a limit, for upload sites with a per-file cap. It replaces the old Tkinter "Zip splitter".
+
+- **Limit:** `990mb` (decimal, 1 MB = 1,000,000 bytes), `990mib` (binary) or plain bytes; quick buttons for 25 MB, 100 MB, 500 MB, 990 MB, 2 GB and 4 GB. Default margin 5 MB.
+- **The limit is guaranteed, not estimated:** before each file is added, the real archive size plus the file plus the local header, central-directory entry and end record (with ZIP64 extras when needed, and the zlib growth bound for deflate) must fit. Each closed part is measured against the limit. With `stored` compression the plan matches the result byte for byte; with `deflated` it is an upper bound.
+- **Layout and filters:** paths inside the ZIP are relative to the source folder with `/` and UTF-8 names. Sort by name or size, `stored` (default) or `deflated`, include/exclude globs (default exclude: `Thumbs.db, desktop.ini, .DS_Store, *.tmp, ~$*`; an explicit list replaces it). Empty folders are not stored and symlinks/junctions are not followed.
+- **Files bigger than the limit** (`too_large`): `skip` (default for the assistant), `fail` (refuse to start), `split` (the file goes alone into a ZIP cut into raw volumes `<prefix>_<name>.zip.001`, `.002`... each within the limit; 7-Zip opens the `.001`, or join with `copy /b`) or `move` (moves the original to `too_large/` in the output; needs confirmation).
+- **Dry run, job and safety:** a plan shows which files go into which part without writing anything. The real run is a background job with progress, cancel and a summary with real part sizes; parts are written as `.tmp` and renamed when closed, so a cancel or failure leaves no half-written part. The output defaults to `<source>_zips` next to the source, never inside it; it must be empty or new unless `overwrite` (which only replaces parts with the same prefix). It refuses drive roots, Windows, Program Files and the profile root, and a whole drive as source needs confirmation. `manifest.txt` lists every part and its files.
+
+HTTP: `POST /api/zip/plan`, `POST /api/zip/split`, `GET /api/zip/job?id=`, `POST /api/zip/cancel` (same token as the other `/api` routes).
+
 ## MCP tools
 
-`mcp_server.py` exposes 14 stdio tools and starts the local app if needed:
+`mcp_server.py` exposes 18 stdio tools and starts the local app if needed:
 
 | Tools | Purpose |
 | --- | --- |
@@ -40,5 +52,7 @@ The assistant can never delete drive roots, the user profile and main folders, W
 | `disk_dir`, `disk_hotspots`, `disk_junk` | Browse folder sizes, non-overlapping hotspots and known cleanup candidates. |
 | `disk_stale`, `disk_top_files`, `disk_types`, `disk_find` | Find old, large or matching files and size by type. |
 | `disk_explain`, `disk_script`, `disk_delete`, `disk_rescan` | Explain a target, prepare a script, delete or refresh a subtree. |
+| `disk_zip_plan`, `disk_zip_split` | Plan (dry run) or create ZIPs of a folder that each stay under a size limit; `too_large` handling `skip`, `fail`, `split` or `move` (needs `confirm=true`). |
+| `disk_zip_status`, `disk_zip_cancel` | Follow or cancel the ZIP job; a cancel leaves no half-written part. |
 
 See [the Spanish README](README.es.md) for the full rule catalogue and examples.

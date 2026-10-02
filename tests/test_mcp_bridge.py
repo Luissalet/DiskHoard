@@ -68,6 +68,9 @@ def test_handshake_lists_the_catalog_and_calls_through(client, tree):
     tools = client.request("tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
     assert names[:2] == ["disk_drives", "disk_scan"] and "disk_delete" in names
+    assert names[-4:] == ["disk_zip_plan", "disk_zip_split", "disk_zip_status", "disk_zip_cancel"]
+    split = next(t for t in tools if t["name"] == "disk_zip_split")
+    assert split["annotations"]["readOnlyHint"] is False and split["inputSchema"]["required"] == ["path"]
     delete = next(t for t in tools if t["name"] == "disk_delete")
     assert delete["annotations"]["destructiveHint"] is True
     assert delete["inputSchema"]["required"] == ["paths"]
@@ -79,6 +82,14 @@ def test_handshake_lists_the_catalog_and_calls_through(client, tree):
     out, is_err = tool_text(client.request("tools/call", {"name": "disk_junk",
                                                           "arguments": {"min_mb": 0, "safety": "safe"}}))
     assert not is_err and all(i["safety"] == "safe" for i in out["items"])
+
+    out, is_err = tool_text(client.request("tools/call", {"name": "disk_zip_plan",
+                                                          "arguments": {"path": str(tree / "videos"),
+                                                                        "limit": "500kb", "margin": "1kb"}}))
+    assert not is_err and out["dry_run"] and out["files"] == 0 and out["too_large_count"] == 1
+
+    out, is_err = tool_text(client.request("tools/call", {"name": "disk_zip_status", "arguments": {}}))
+    assert "state" in out or "disk_zip_split" in out["error"]       # trabajo previo, o aviso de que no hay ninguno
 
     out, is_err = tool_text(client.request("tools/call", {"name": "disk_delete",
                                                           "arguments": {"paths": [str(tree / "proyecto" / ".git")],

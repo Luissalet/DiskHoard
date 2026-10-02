@@ -19,6 +19,7 @@ import os
 import time
 
 from . import junk as junkmod
+from . import zipsplit
 from .winfs import IS_WIN, long_path, norm_display
 
 MB = 1024 ** 2
@@ -153,6 +154,86 @@ CATALOG = [
           "Re-read one subfolder and splice fresh numbers into the scan. Keywords: refrescar, actualizar, rescan.\n"
           "Seconds instead of a full scan. Use it after deleting outside the app or when a folder changed.",
           {"path": _PATH}, idempotent=True),
+    _tool("disk_zip_plan",
+          "Dry-run: plan ZIP parts under a size limit. Keywords: partir en zips, dividir en partes, zip de 990 MB.\n"
+          "Takes a folder and says which files go into part_001.zip, part_002.zip... so that every part stays "
+          "under the limit (upload sites with a per-file cap), the estimated size of each part and the files "
+          "bigger than the limit. Writes nothing. With compression='stored' the sizes are exact; with 'deflated' "
+          "they are upper bounds. Sizes: '990mb' decimal, '990mib' binary, plain bytes. Default excludes: "
+          + ", ".join(zipsplit.DEFAULT_EXCLUDE) + " (an explicit exclude list replaces them).\n"
+          "Sinónimos: partir esta carpeta en zips, dividir en partes de 990 MB, comprimir por partes, "
+          "cuántos zips saldrían, zip para subir a una web con límite.",
+          {"path": {"type": "string", "description": "Absolute folder to split, e.g. D:\\Fotos"},
+           "out_dir": {"type": "string", "description": "Output folder to validate and show; default <path>_zips"},
+           "limit": {"type": "string", "default": "990mb",
+                     "description": "Maximum size of each ZIP: '990mb', '25mb', '2gb', '990mib' or bytes"},
+           "margin": {"type": "string", "default": "5mb", "description": "Safety margin subtracted from the limit"},
+           "prefix": {"type": "string", "default": "part"},
+           "sort": {"type": "string", "enum": list(zipsplit.SORT_MODES), "default": "name"},
+           "compression": {"type": "string", "enum": list(zipsplit.COMPRESSIONS), "default": "stored",
+                           "description": "'stored' (no compression, exact sizes) or 'deflated'"},
+           "too_large": {"type": "string", "enum": list(zipsplit.TOO_LARGE_MODES), "default": "skip",
+                         "description": "Files that alone exceed the limit: skip, fail, move (to too_large/) or "
+                                        "split (raw volumes .zip.001, .002...)"},
+           "include": {"type": "array", "items": {"type": "string"},
+                       "description": "Only files matching one of these globs, e.g. ['*.jpg']"},
+           "exclude": {"type": "array", "items": {"type": "string"},
+                       "description": "Skip files or folders matching these globs, e.g. ['*.tmp', 'node_modules']"},
+           "list_files": {"type": "boolean", "default": False,
+                          "description": "List every file of every part instead of a short sample"},
+           "confirm": {"type": "boolean", "default": False,
+                       "description": "Needed when the source is a whole drive root"}},
+          ["path"], idempotent=True),
+    _tool("disk_zip_split",
+          "Split a folder into ZIPs under a size limit. Keywords: partir en zips, comprimir por partes, zip de 990 MB.\n"
+          "Creates part_001.zip, part_002.zip... in out_dir (default: <folder>_zips next to the source, never "
+          "inside it) and guarantees every part is <= the limit: the real archive size plus the next file and "
+          "the ZIP headers (ZIP64 included) is checked before adding it, and each closed part is measured. "
+          "Folder structure is kept; manifest.txt lists the contents. Files bigger than the limit: "
+          "too_large='skip' (default), 'fail' (refuse to start), 'split' (the file goes alone into a ZIP cut in raw "
+          "volumes name.zip.001, .002...; open the .001 with 7-Zip or join with `copy /b`) or 'move' (MOVES the "
+          "original into out_dir/too_large/: needs confirm=true). The output folder must be empty or new unless "
+          "overwrite=true, which only replaces parts with the same prefix. Refuses to write into a drive root, "
+          "Windows, Program Files or the profile root. Runs as a job: with wait=true (default) it blocks until it "
+          "ends and returns every part with its real size; with wait=false use disk_zip_status.\n"
+          "Sinónimos: parte esta carpeta en zips, divide en partes de 990 MB, comprímelo por partes, "
+          "hazme zips de 25 MB para el correo, zips para subir a una web.",
+          {"path": {"type": "string", "description": "Absolute folder to split, e.g. D:\\Fotos"},
+           "out_dir": {"type": "string", "description": "Output folder; default <path>_zips next to the source"},
+           "limit": {"type": "string", "default": "990mb",
+                     "description": "Maximum size of each ZIP: '990mb', '25mb', '2gb', '990mib' or bytes"},
+           "margin": {"type": "string", "default": "5mb", "description": "Safety margin subtracted from the limit"},
+           "prefix": {"type": "string", "default": "part"},
+           "sort": {"type": "string", "enum": list(zipsplit.SORT_MODES), "default": "name"},
+           "compression": {"type": "string", "enum": list(zipsplit.COMPRESSIONS), "default": "stored"},
+           "too_large": {"type": "string", "enum": list(zipsplit.TOO_LARGE_MODES), "default": "skip"},
+           "include": {"type": "array", "items": {"type": "string"}},
+           "exclude": {"type": "array", "items": {"type": "string"},
+                       "description": "Replaces the default excludes (" + ", ".join(zipsplit.DEFAULT_EXCLUDE) + ")"},
+           "overwrite": {"type": "boolean", "default": False},
+           "manifest": {"type": "boolean", "default": True, "description": "Write manifest.txt in the output folder"},
+           "confirm": {"type": "boolean", "default": False,
+                       "description": "Required for too_large='move' (moves user files) and for a whole drive as source"},
+           "wait": {"type": "boolean", "default": True, "description": "Block until the job ends"},
+           "timeout_s": {"type": "integer", "minimum": 5, "maximum": 3600, "default": 150,
+                         "description": "Maximum seconds to wait when wait=true (default 150, under an assistant's "
+                                        "usual 180 s call limit); past it the job keeps running"}},
+          ["path"], read_only=False),
+    _tool("disk_zip_status",
+          "Progress of a ZIP split job. Keywords: estado del zip, progreso, cuánto falta.\n"
+          "Bytes done and total, current file, part number and, when finished, the summary with every part and "
+          "its real size. Without job it reports the last one.\n"
+          "Sinónimos: cómo va el zip, qué parte lleva, ya ha terminado de comprimir.",
+          {"job": {"type": "string", "description": "Job id returned by disk_zip_split; omit for the last job"},
+           "wait_s": {"type": "integer", "minimum": 0, "maximum": 150, "default": 0,
+                      "description": "Wait up to this many seconds for the job to finish before answering"}},
+          idempotent=True),
+    _tool("disk_zip_cancel",
+          "Cancel the running ZIP split job. Keywords: cancelar zip, parar la compresión, detener.\n"
+          "Closed parts stay; the part being written is deleted, so no half-written ZIP is left behind.\n"
+          "Sinónimos: para el zip, cancela la compresión, detén la división en partes.",
+          {"job": {"type": "string", "description": "Job id; omit for the last job"}},
+          read_only=False, idempotent=True),
 ]
 
 TOOL_NAMES = [t["name"] for t in CATALOG]
@@ -166,7 +247,9 @@ INSTRUCTIONS = (
     "the drive the user asks about, read it (and say how old it is) instead of scanning again; otherwise "
     "disk_scan that drive or folder. Then read disk_hotspots and disk_junk. Quote sizes in GB with one decimal. Before any disk_delete, list "
     "the exact paths and their safety level to the user; use mode='permanent' only when they ask for it "
-    "explicitly. When unsure, hand them a disk_script instead."
+    "explicitly. When unsure, hand them a disk_script instead. To split a folder into ZIPs under a size limit "
+    "(upload sites, e-mail) run disk_zip_plan first, then disk_zip_split; too_large='move' moves the user's "
+    "files, so ask before using it."
 )
 
 
@@ -307,6 +390,88 @@ class Agent:
                         "say how old it is, and call disk_scan when the user wants fresh numbers." % sc.root_display,
             }
         return out, is_err
+
+    # ---- partir en ZIPs
+    def _zip_options(self, **kw):
+        kw = {k: v for k, v in kw.items() if v is not None}
+        return zipsplit.options_from(kw)
+
+    def t_disk_zip_plan(self, path, out_dir=None, limit="990mb", margin="5mb", prefix="part", sort="name",
+                        compression="stored", too_large="skip", include=None, exclude=None, list_files=False,
+                        confirm=False):
+        try:
+            o = self._zip_options(path=path, out_dir=out_dir, limit=limit, margin=margin, prefix=prefix, sort=sort,
+                                  compression=compression, too_large=too_large, include=include, exclude=exclude)
+            out = zipsplit.plan(o, confirm=bool(confirm), files=bool(list_files))
+        except zipsplit.ZipSplitError as exc:
+            return {"error": str(exc)}
+        self._note("disk_zip_plan", "%d parts, %d files, %d too large" % (
+            out["part_count"], out["files"], out["too_large_count"]), {"path": out["input"]})
+        return out
+
+    def t_disk_zip_split(self, path, out_dir=None, limit="990mb", margin="5mb", prefix="part", sort="name",
+                         compression="stored", too_large="skip", include=None, exclude=None, overwrite=False,
+                         manifest=True, confirm=False, wait=True, timeout_s=150):
+        try:
+            o = self._zip_options(path=path, out_dir=out_dir, limit=limit, margin=margin, prefix=prefix,
+                                  sort=sort, compression=compression, too_large=too_large, include=include,
+                                  exclude=exclude, overwrite=overwrite, manifest=manifest)
+            job = zipsplit.REGISTRY.start(o, confirm=bool(confirm))
+        except zipsplit.ZipSplitError as exc:
+            return {"error": str(exc)}
+        args = {"path": job.opts.input_dir, "out_dir": job.opts.out_dir, "limit": limit,
+                "too_large": too_large}
+        if not wait:
+            self._note("disk_zip_split", "started %s -> %s" % (job.opts.input_dir, job.opts.out_dir), args)
+            return {"started": True, "job": job.id, "out_dir": job.opts.out_dir,
+                    "hint": "Call disk_zip_status to follow it."}
+        deadline = time.time() + max(5, min(3600, int(timeout_s)))
+        while job.running and time.time() < deadline:
+            time.sleep(0.1)
+        snap = job.snapshot()
+        if job.running:
+            self._note("disk_zip_split", "running %s -> %s" % (job.opts.input_dir, job.opts.out_dir), args)
+            snap["timeout"] = True
+            snap["hint"] = "Still running; call disk_zip_status until finished is true, or disk_zip_cancel."
+            return snap
+        if snap.get("error"):
+            self._note("disk_zip_split", "failed: %s" % snap["error"], args)
+            return {"error": snap["error"], "job": job.id}
+        out = dict(snap["summary"])
+        out["job"] = job.id
+        self._note("disk_zip_split", "%d parts, %s%s -> %s" % (
+            out.get("part_count", 0), out.get("bytes_out_human", ""),
+            " (cancelled)" if out.get("cancelled") else "", out["out_dir"]), args)
+        return out
+
+    def _zip_job(self, job):
+        j = zipsplit.REGISTRY.get(job)
+        if j is None:
+            return None, {"error": "No ZIP job%s: start one with disk_zip_split." % (" with that id" if job else "")}
+        return j, None
+
+    def t_disk_zip_status(self, job=None, wait_s=0):
+        j, err = self._zip_job(job)
+        if err:
+            return err
+        deadline = time.time() + max(0, min(150, int(wait_s or 0)))
+        while j.running and time.time() < deadline:
+            time.sleep(0.1)
+        return j.snapshot()
+
+    def t_disk_zip_cancel(self, job=None):
+        j, err = self._zip_job(job)
+        if err:
+            return err
+        was = j.running
+        j.cancel()
+        deadline = time.time() + 15
+        while j.running and time.time() < deadline:
+            time.sleep(0.1)
+        self._note("disk_zip_cancel", "job %s %s" % (j.id, "cancelled" if was else "was already finished"))
+        out = j.snapshot()
+        out["was_running"] = was
+        return out
 
     # ---- lo que hay que tener
     def _need_scan(self):

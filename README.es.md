@@ -104,9 +104,48 @@ Nada se borra sin confirmación explícita en un diálogo que lista lo seleccion
 si hay algo marcado como «no tocar». Tras borrar, **⟳ esta carpeta** vuelve a leer solo
 ese subárbol en un par de segundos y te dice cuánto ha cambiado.
 
+## Partir en ZIPs
+
+Pestaña **Partir en ZIPs** (también en la pantalla de inicio, el botón «Partir en ZIPs…» de la barra de la
+carpeta y el de la selección): convierte una carpeta en `part_001.zip`, `part_002.zip`… y **ninguno pasa del
+límite**, para webs que limitan el tamaño por fichero. Sustituye al antiguo «Zip splitter» de Tkinter.
+
+- **Límite**: `990mb` (decimal, 1 MB = 1.000.000 bytes, lo que cuentan las webs), `990mib` (binario) o bytes
+  sueltos. Atajos: 25 MB (correo), 100 MB, 500 MB, 990 MB, 2 GB y 4 GB. Margen por defecto: 5 MB.
+- **El límite se garantiza, no se estima**: antes de añadir un fichero se suma el tamaño real del archivo en curso
+  + el fichero + cabecera local + entrada del directorio central + registro final (con los extras ZIP64 cuando
+  hacen falta: ficheros o partes de más de 2 GiB, más de 65535 entradas) y, en deflate, la cota de crecimiento de
+  zlib. Al cerrar cada parte se mide y se comprueba contra el límite. Con «Sin comprimir» el plan coincide byte a
+  byte con el resultado; con Deflate el plan es un máximo.
+- **Estructura**: las rutas dentro del ZIP son relativas a la carpeta de origen, con `/` y nombres UTF-8.
+  Las carpetas vacías no se incluyen; los enlaces simbólicos y uniones no se siguen.
+- **Orden**: por nombre o por tamaño (pequeños primero). **Compresión**: sin comprimir (por defecto) o deflate.
+- **Incluir / excluir** con patrones (`*.jpg`, `node_modules`, `fotos/*`). Por defecto se excluye
+  `Thumbs.db, desktop.ini, .DS_Store, *.tmp, ~$*`; una lista de exclusión explícita (aunque sea vacía) sustituye
+  a esa. La carpeta de salida nunca se empaqueta.
+- **Un fichero mayor que el límite** (`too_large`): `skip` saltarlo (por defecto para el asistente), `fail` negarse
+  a empezar, `split` guardarlo solo en un ZIP cortado en volúmenes crudos `<prefijo>_<nombre>.zip.001`, `.002`…
+  (cada uno dentro del límite; 7-Zip abre el `.001`; en Windows se unen con
+  `copy /b "x.zip.001"+"x.zip.002" "x.zip"`) o `move` (**mueve** el original a `too_large/` dentro de la salida:
+  pide confirmación).
+- **Plan en seco** («Calcular plan»): qué fichero va a qué parte, tamaño estimado de cada una y la lista de
+  demasiado grandes, sin escribir nada.
+- **Salida**: `<origen>_zips` junto al origen por defecto; nunca dentro del origen. Debe estar vacía o ser nueva,
+  salvo `overwrite`, que solo sustituye partes con el mismo prefijo. No escribe en raíces de unidad, `Windows`,
+  `Archivos de programa` ni la raíz del perfil, y un origen que sea una unidad entera pide confirmación.
+  `manifest.txt` (opcional, activado) lista cada parte con sus ficheros.
+- **Trabajo en segundo plano** con progreso (bytes, fichero actual, parte), cancelación y resumen con el tamaño
+  real de cada parte. Las partes se escriben como `.tmp` y se renombran al cerrarse: si se cancela o falla no
+  queda ninguna a medias (las ya cerradas se conservan). Solo hay un trabajo a la vez.
+- Si un fichero no se puede leer, se salta y se anota; si falla la lectura a mitad de un fichero, el trabajo se
+  detiene y borra la parte en curso.
+
+Rutas HTTP (mismo token que el resto de `/api`): `POST /api/zip/plan`, `POST /api/zip/split`,
+`GET /api/zip/job?id=` (sin `id`, el último) y `POST /api/zip/cancel`. Los errores devuelven 400 con `error`.
+
 ## Control por agente (MCP)
 
-`mcp_server.py` es un servidor MCP por stdio, también sin dependencias. Expone 14
+`mcp_server.py` es un servidor MCP por stdio, también sin dependencias. Expone 18
 herramientas que reenvía a la app en marcha (y si no está en marcha, la arranca):
 
 | Herramienta | Qué hace |
@@ -122,6 +161,12 @@ herramientas que reenvía a la app en marcha (y si no está en marcha, la arranc
 | `disk_script` | genera y guarda el `.ps1` de limpieza (`-WhatIf`) sin tocar nada |
 | `disk_delete` | borra: a la papelera por defecto; definitivo solo con `mode="permanent"` y `confirm=true` |
 | `disk_rescan` | vuelve a leer una subcarpeta y empalma los números |
+| `disk_zip_plan` | plan en seco para partir una carpeta en ZIPs de un tamaño máximo: partes, tamaños y ficheros demasiado grandes |
+| `disk_zip_split` | crea los ZIPs (`part_001.zip`…) garantizando el límite; `too_large`: `skip`, `fail`, `split` (volúmenes `.zip.001`) o `move` (con `confirm=true`); espera al final o devuelve un trabajo |
+| `disk_zip_status` / `disk_zip_cancel` | progreso y resumen del trabajo de ZIPs / cancelarlo sin dejar partes a medias |
+
+Partir en ZIPs no borra nada: solo lee el origen y escribe en la carpeta de salida (que debe estar vacía o ser
+nueva). `too_large="move"` es lo único que toca el origen, y exige `confirm=true`.
 
 Lo que un agente **nunca** puede borrar, diga lo que diga: raíces de unidad, el perfil de
 usuario y sus carpetas principales, `Windows`, `Archivos de programa`, `ProgramData` y todo lo
@@ -214,12 +259,13 @@ DiskHoard/
 ├── selftest.py            modo consola
 ├── mcp_server.py          servidor MCP (stdio) para agentes
 ├── faustus-plugin.json    manifiesto para conectarla a Faustus
-├── tests/                 pytest: herramientas del agente y puente MCP
+├── tests/                 pytest: herramientas del agente, puente MCP y partir en ZIPs
 └── diskhoard/
     ├── scanner.py         motor de escaneo multihilo
     ├── junk.py            catálogo de basura + puntos calientes
     ├── winfs.py           rutas largas, unidades, papelera, borrado
     ├── agent.py           catálogo de herramientas del agente y reglas de borrado
+    ├── zipsplit.py        partir carpetas en ZIPs con límite garantizado (lógica pura)
     ├── server.py          servidor HTTP local + API
     ├── hoard_link/        librería de la familia (vendida): eventos al hub, bloque de salud
     └── web/index.html     interfaz entera en un fichero
@@ -232,6 +278,9 @@ Tests: `python -m pytest -q tests` (solo necesita pytest).
 - Solo Windows. El motor de escaneo es portable, pero la papelera y la enumeración de
   unidades usan la API de Windows.
 - La interfaz está solo en castellano.
+- Partir en ZIPs no incluye carpetas vacías, no sigue enlaces simbólicos ni uniones y no cifra ni protege con
+  contraseña. Con Deflate el plan es un máximo y el resultado puede salir en menos partes; un fichero modificado
+  mientras se lee se guarda con el tamaño que tenía al empezar (y se avisa).
 - Los tamaños son lógicos, no *tamaño en disco*: no tiene en cuenta compresión NTFS,
   ficheros dispersos ni el tamaño de clúster.
 

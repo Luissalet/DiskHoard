@@ -44,10 +44,14 @@ def test_catalog_first_lines_fit_the_tool_index():
         assert "readOnlyHint" in t["annotations"]
 
 
+WRITERS = {"disk_delete", "disk_zip_split", "disk_zip_cancel"}
+
+
 def test_only_delete_is_destructive():
     destructive = [t["name"] for t in agentmod.CATALOG if t["annotations"]["destructiveHint"]]
     assert destructive == ["disk_delete"]
-    assert all(t["annotations"]["readOnlyHint"] for t in agentmod.CATALOG if t["name"] != "disk_delete")
+    assert all(t["annotations"]["readOnlyHint"] for t in agentmod.CATALOG if t["name"] not in WRITERS)
+    assert not any(t["annotations"]["readOnlyHint"] for t in agentmod.CATALOG if t["name"] in WRITERS)
 
 
 def test_health_needs_no_token_and_names_the_service(server):
@@ -276,3 +280,117 @@ def test_family_contract_bearer_token_health_block_and_call_events(server, monke
 
     call(server, "no_such_tool", expect=400)
     assert seen[-1][1]["tool"] == "no_such_tool" and seen[-1][1]["ok"] is False and "unknown tool" in seen[-1][1]["error"]
+
+
+# --------------------------------------------------------------- partir en ZIPs
+
+ZIP_TOOLS = ["disk_zip_plan", "disk_zip_split", "disk_zip_status", "disk_zip_cancel"]
+
+
+def zip_tree(base, sizes=(100_000,) * 7, folder="origen"):
+    import random
+    rng = random.Random(11)
+    root = os.path.join(str(base), folder)
+    os.makedirs(root, exist_ok=True)
+    for i, size in enumerate(sizes):
+        with open(os.path.join(root, "f%02d.bin" % i), "wb") as fh:
+            fh.write(rng.randbytes(size))
+    return root
+
+
+def test_zip_tools_are_in_the_catalog_with_spanish_phrases():
+    names = [t["name"] for t in agentmod.CATALOG]
+    assert names[-4:] == ZIP_TOOLS and agentmod.TOOL_NAMES == names
+    by = {t["name"]: t for t in agentmod.CATALOG}
+    first = by["disk_zip_split"]["description"].split("\n")[0]
+    assert "partir en zips" in first.lower() and "990 MB" in first
+    assert "dividir en partes" in by["disk_zip_plan"]["description"].split("\n")[0]
+    for name in ZIP_TOOLS:
+        assert "Sinónimos: " in by[name]["description"]
+    assert by["disk_zip_plan"]["annotations"]["readOnlyHint"] is True
+    assert by["disk_zip_split"]["inputSchema"]["required"] == ["path"]
+    assert set(by["disk_zip_split"]["inputSchema"]["properties"]) >= {
+        "path", "out_dir", "limit", "margin", "prefix", "sort", "compression", "too_large", "include", "exclude",
+        "overwrite", "manifest", "confirm", "wait", "timeout_s"}
+    assert by["disk_zip_split"]["inputSchema"]["properties"]["too_large"]["default"] == "skip"
+    assert by["disk_zip_split"]["inputSchema"]["properties"]["wait"]["default"] is True
+    assert by["disk_zip_split"]["inputSchema"]["properties"]["timeout_s"]["default"] == 150
+    assert by["disk_zip_status"]["inputSchema"]["properties"]["wait_s"]["maximum"] == 150
+
+
+def test_zip_plan_tool_is_read_only(server, tmp_path):
+    root = zip_tree(tmp_path)
+    out = call(server, "disk_zip_plan", {"path": root, "limit": "300000", "margin": "10000"})
+    assert out["dry_run"] and out["part_count"] == 4 and out["files"] == 7
+    assert not os.path.exists(root + "_zips")
+    assert out["parts"][0]["sample"] and "files" not in out["parts"][0]
+    full = call(server, "disk_zip_plan", {"path": root, "limit": "300000", "margin": "10000", "list_files": True})
+    assert sum(len(p["files"]) for p in full["parts"]) == 7
+    assert "error" in call(server, "disk_zip_plan", {"path": root, "limit": "tres"}, expect=400)
+    assert "dentro" in call(server, "disk_zip_plan", {"path": root, "out_dir": os.path.join(root, "x")},
+                            expect=400)["error"]
+    assert call(server, "disk_zip_plan", {"path": root, "prefix": "foto", "limit": "300000", "margin": "10000"}
+                )["parts"][0]["name"] == "foto_001.zip"
+
+
+def test_zip_split_tool_waits_logs_and_reports_real_sizes(server, tmp_path):
+    root = zip_tree(tmp_path)
+    before = get(server, "/api/agent/log")["seq"]
+    out = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb"})
+    assert out["out_dir"] == root + "_zips" and out["part_count"] == 4 and out["files_added"] == 7
+    for p in out["parts"]:
+        assert p["size"] == os.path.getsize(p["path"]) <= 300_000 and p["within_limit"]
+    assert out["too_large"] == [] and out["job"] and out["manifest"].endswith("manifest.txt")
+    st = call(server, "disk_zip_status")
+    assert st["finished"] and st["state"] == "done" and st["summary"]["part_count"] == 4
+    assert call(server, "disk_zip_status", {"job": out["job"]})["id"] == out["job"]
+    assert "error" in call(server, "disk_zip_status", {"job": "9999"}, expect=400)
+    items = get(server, "/api/agent/log", )["items"]
+    mine = [i for i in items if i["seq"] > before]
+    assert [i["tool"] for i in mine] == ["disk_zip_split"] and "4 parts" in mine[0]["summary"]
+    # la carpeta de salida ya no está vacía: hay que decir overwrite
+    again = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb"}, expect=400)
+    assert "no está vacía" in again["error"]
+    ok = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb", "overwrite": True})
+    assert ok["part_count"] == 4
+
+
+def test_zip_split_tool_nowait_status_and_cancel(server, tmp_path):
+    import time
+    root = zip_tree(tmp_path, sizes=(1_500_000,) * 6)
+    started = call(server, "disk_zip_split", {"path": root, "limit": "2mb", "margin": "1kb", "wait": False})
+    assert started["started"] and started["job"]
+    cancelled = call(server, "disk_zip_cancel", {"job": started["job"]})
+    assert cancelled["finished"] and cancelled["state"] in ("cancelled", "done")
+    if os.path.isdir(root + "_zips"):
+        assert [n for n in os.listdir(root + "_zips") if n.endswith(".tmp")] == []
+    idle = call(server, "disk_zip_cancel")
+    assert idle["was_running"] is False
+    tools = [i["tool"] for i in get(server, "/api/agent/log")["items"]]
+    assert "disk_zip_cancel" in tools
+
+
+def test_zip_move_and_drive_root_need_confirm(server, tmp_path):
+    root = zip_tree(tmp_path, sizes=(50_000, 700_000, 40_000))
+    out = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb", "too_large": "move"},
+               expect=400)
+    assert "confirm" in out["error"]
+    assert os.path.exists(os.path.join(root, "f01.bin")) and not os.path.exists(root + "_zips")
+    ok = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb", "too_large": "move",
+                                         "confirm": True})
+    assert ok["too_large"][0]["result"] == "moved" and not os.path.exists(os.path.join(root, "f01.bin"))
+    assert os.path.isfile(os.path.join(root + "_zips", "too_large", "f01.bin"))
+    drive = os.path.abspath(os.sep)
+    assert "confirm" in call(server, "disk_zip_split", {"path": drive, "out_dir": str(tmp_path / "d")}, expect=400)["error"]
+    assert "confirm" in call(server, "disk_zip_plan", {"path": drive, "out_dir": str(tmp_path / "d")}, expect=400)["error"]
+
+
+def test_zip_split_tool_volumes_and_default_skip(server, tmp_path):
+    root = zip_tree(tmp_path, sizes=(50_000, 700_000, 40_000))
+    skipped = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb"})
+    assert skipped["too_large"][0]["result"] == "skipped" and os.path.exists(os.path.join(root, "f01.bin"))
+    out = call(server, "disk_zip_split", {"path": root, "limit": "300kb", "margin": "10kb", "too_large": "split",
+                                          "out_dir": str(tmp_path / "volumenes")})
+    vols = out["too_large"][0]["volumes"]
+    assert len(vols) >= 3 and all(v["size"] <= 300_000 for v in vols)
+    assert all(v["name"].startswith("part_") for v in vols)

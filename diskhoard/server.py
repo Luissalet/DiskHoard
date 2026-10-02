@@ -19,6 +19,7 @@ from . import __version__
 from . import agent as agentmod
 from . import junk as junkmod
 from . import scanner as scanmod
+from . import zipsplit
 from .hoard_link import family
 from .winfs import (IS_WIN, delete_permanent, list_drives, long_path,
                     norm_display, send_to_trash)
@@ -496,6 +497,42 @@ def api_open(path):
         return {"error": str(exc)}
 
 
+# --------------------------------------------------------------- partir en ZIPs
+
+def api_zip_plan(body):
+    """Plan en seco: nada se escribe."""
+    try:
+        o = zipsplit.options_from(body)
+        return zipsplit.plan(o, confirm=bool(body.get("confirm")), files=bool(body.get("files")))
+    except zipsplit.ZipSplitError as exc:
+        return {"error": str(exc)}
+
+
+def api_zip_split(body):
+    """Lanza el trabajo en segundo plano; el estado sale de api_zip_job."""
+    try:
+        o = zipsplit.options_from(body)
+        job = zipsplit.REGISTRY.start(o, confirm=bool(body.get("confirm")))
+    except zipsplit.ZipSplitError as exc:
+        return {"error": str(exc)}
+    return {"ok": True, "job": job.id, "out_dir": job.opts.out_dir}
+
+
+def api_zip_job(jid=None):
+    job = zipsplit.REGISTRY.get(jid)
+    if job is None:
+        return {"error": "No hay ningún trabajo de ZIP" + (" con ese id." if jid else ".")}
+    return job.snapshot()
+
+
+def api_zip_cancel(jid=None):
+    job = zipsplit.REGISTRY.get(jid)
+    if job is None:
+        return {"error": "No hay ningún trabajo de ZIP que cancelar."}
+    job.cancel()
+    return {"ok": True, "job": job.id, "was_running": job.running}
+
+
 # -------------------------------------------------------------------- HTTP
 
 class Handler(BaseHTTPRequestHandler):
@@ -560,6 +597,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(api_exts())
         if p == "/api/job":
             return self._json(api_job(one("id")))
+        if p == "/api/zip/job":
+            out = api_zip_job(one("id") or None)
+            return self._json(out, 404 if "error" in out else 200)
         if p == "/api/agent/tools":
             return self._json({"tools": agentmod.CATALOG, "instructions": agentmod.INSTRUCTIONS,
                                "service": SERVICE, "version": __version__})
@@ -593,6 +633,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(api_script(body.get("paths", [])))
         if p == "/api/open":
             return self._json(api_open(body.get("path", "")))
+        if p in ("/api/zip/plan", "/api/zip/split", "/api/zip/cancel"):
+            if p == "/api/zip/plan":
+                out = api_zip_plan(body)
+            elif p == "/api/zip/split":
+                out = api_zip_split(body)
+            else:
+                out = api_zip_cancel(body.get("id") or body.get("job") or None)
+            return self._json(out, 400 if "error" in out else 200)
         if p == "/api/quit":
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return self._json({"ok": True})
