@@ -2,12 +2,11 @@
 """Servidor local de DiskHoard. Solo libreria estandar."""
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
-import secrets
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -21,7 +20,11 @@ from . import junk as junkmod
 from . import scanner as scanmod
 from . import zipsplit
 from .hoard_link import family
-from .winfs import (IS_WIN, delete_permanent, list_drives, long_path,
+from .hoard_link.atomic import write_text_atomic
+from .hoard_link.guard import check_request, parse_allowed_hosts
+from .hoard_link.proc import reveal_in_file_manager
+from .hoard_link.tokens import read_or_create_token
+from .winfs import (delete_permanent, list_drives, long_path,
                     norm_display, send_to_trash)
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -42,20 +45,7 @@ def load_token():
     Si el fichero no existe se crea (solo legible por el usuario donde el SO
     lo permite).
     """
-    path = os.path.join(data_dir(), "mcp-token")
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            tok = fh.read().strip()
-        if len(tok) >= 16:
-            return tok
-    except OSError:
-        pass
-    tok = secrets.token_urlsafe(24)
-    os.makedirs(data_dir(), exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(tok)
-    return tok
+    return read_or_create_token(os.path.join(data_dir(), "mcp-token"), min_len=16)
 
 
 TOKEN = load_token()
@@ -486,13 +476,11 @@ def api_script(paths):
 
 
 def api_open(path):
+    """Muestra el fichero (seleccionado) o la carpeta en el explorador del sistema (Hoard Link)."""
     try:
-        if IS_WIN:
-            if os.path.isdir(path):
-                subprocess.Popen(["explorer", path])
-            else:
-                subprocess.Popen(["explorer", "/select,", path])
-        return {"ok": True}
+        if reveal_in_file_manager(path):
+            return {"ok": True}
+        return {"error": "No se pudo abrir el explorador en esa ruta."}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -555,9 +543,21 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization") or ""
         bearer = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
         tok = self.headers.get("X-DH-Token") or bearer or (qs.get("t", [""])[0])
-        return tok == TOKEN
+        return hmac.compare_digest(tok.encode("utf-8"), TOKEN.encode("utf-8"))
+
+    def _blocked(self, method):
+        """The shared Host / Origin / Fetch Metadata rules (DNS rebinding, cross-site pages). True when the
+        request was refused and answered. DISKHOARD_ALLOWED_HOSTS opens a LAN name on purpose."""
+        verdict = check_request(method, {k.lower(): v for k, v in self.headers.items()}, ST.port,
+                                parse_allowed_hosts(os.environ.get("DISKHOARD_ALLOWED_HOSTS")), strict_ports=True)
+        if verdict is None:
+            return False
+        self._json({"error": verdict[1]}, verdict[0])
+        return True
 
     def do_GET(self):
+        if self._blocked("GET"):
+            return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         p = u.path
@@ -608,6 +608,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "endpoint desconocido"}, 404)
 
     def do_POST(self):
+        if self._blocked("POST"):
+            return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         if not self._auth(qs):
@@ -729,9 +731,7 @@ def serve(port=None, open_browser=False):
     ST.port = srv.server_address[1]
     base = "http://127.0.0.1:%d" % ST.port
     try:
-        os.makedirs(data_dir(), exist_ok=True)
-        with open(os.path.join(data_dir(), "url"), "w", encoding="utf-8") as fh:
-            fh.write(base)
+        write_text_atomic(os.path.join(data_dir(), "url"), base)
     except OSError:
         pass
     url = "%s/?t=%s" % (base, TOKEN)
