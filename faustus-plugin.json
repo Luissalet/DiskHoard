@@ -10,11 +10,13 @@
     "TOKEN_FILE": "{DISKHOARD_DIR}/data/mcp-token"
   },
   "app": {
+    "x-url-file": "{DISKHOARD_DIR}/data/url",
     "url_default": "http://127.0.0.1:8817",
     "ui_url": "{APP_URL}",
     "health": { "path": "/api/health", "expect": { "service": "disk-hoard" } },
     "identify": { "service": ["disk-hoard"], "title": ["diskhoard", "disk hoard"] },
     "launch_hint": {
+      "port_argument": "--port",
       "kind": "process",
       "executable": "{FAUSTUS_PYTHON}",
       "argv": ["-m", "diskhoard", "--no-browser"],
