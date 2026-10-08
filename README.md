@@ -65,3 +65,7 @@ request guard (`guard.check_request`: loopback Host, Origin and Fetch Metadata r
 (`tokens.read_or_create_token`, `data/mcp-token`), the Windows-safe replace with retries for the last-scan snapshot and
 the ZIP parts (`atomic.replace_with_retry`), the "show in file manager" action (`proc.reveal_in_file_manager`), and the
 family contract (`GET /api/agent/tools`, `POST /api/agent/call` with the bearer token, `agent.call` events).
+
+## Disk map keyboard navigation
+
+The treemap supports Tab, directional arrow navigation, Enter/Space to open a folder or inspect a file, and Backspace to return to the parent. Cells announce name and size. Existing deletion confirmations are preserved.

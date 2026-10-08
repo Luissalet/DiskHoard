@@ -292,3 +292,7 @@ Tests: `python -m pytest -q tests` (solo necesita pytest).
 ## Licencia
 
 MIT. Ver [LICENSE](LICENSE).
+
+## Navegación del mapa de disco
+
+El treemap admite teclado: Tab entra en una celda, las flechas seleccionan la celda próxima en esa dirección, Enter o Espacio abren una carpeta o muestran los datos de un archivo, y Retroceso vuelve al padre. Cada celda anuncia nombre y tamaño. La navegación conserva los controles de confirmación de borrado existentes.

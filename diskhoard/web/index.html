@@ -913,7 +913,7 @@ function renderTree() {
   if (!d) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="cards" style="padding:12px 14px 0"><div class="card" style="background:var(--hoard-sunken)">
     <div class="why">Cada rectángulo es una carpeta o fichero de <b class="mono">${esc(d.path)}</b>,
-    con el área proporcional a lo que ocupa. Clic para entrar.</div></div></div><div id="tm"></div>`;
+    con el área proporcional a lo que ocupa. Flechas para moverte, Enter para entrar; Retroceso para subir.</div></div></div><div id="tm" aria-label="Mapa de espacio en disco"></div>`;
   const box = $('#tm');
   const items = d.entries.filter(e => e.size > 0).slice(0, 160);
   if (!items.length) { box.innerHTML = '<div class="empty">Nada que dibujar.</div>'; return; }
@@ -927,12 +927,27 @@ function renderTree() {
       const hue = sf==='safe' ? 135 : sf==='review' ? 40 : sf==='danger' ? 0 : (210 + (i*37)%80);
       const sat = sf ? 45 : 32, lig = 24 + (i%5)*3;
       const show = r.w > 54 && r.h > 24;
-      return `<div class="tmb" data-p="${esc(e.path)}" data-d="${e.dir?1:0}"
+      return `<div class="tmb" tabindex="0" role="button" aria-label="${esc(e.name)} · ${fb(e.size)}${e.dir?' · carpeta':' · fichero'}" data-p="${esc(e.path)}" data-d="${e.dir?1:0}"
         style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;
         background:hsl(${hue},${sat}%,${lig}%)" title="${esc(e.name)} — ${fb(e.size)}">
         ${show ? `<div class="l">${esc(e.name)}</div><div class="s">${fb(e.size)}</div>` : ''}</div>`;
     }).join('');
-    $$('#tm .tmb').forEach(b => b.onclick = () => { if (b.dataset.d === '1') go(b.dataset.p); });
+    $$('#tm .tmb').forEach(b => {
+      b.onclick = () => { if (b.dataset.d === '1') go(b.dataset.p); else modal('Fichero', `<p class="mono">${esc(b.dataset.p)}</p><p>${esc(b.title)}</p>`, [{label:'Cerrar',fn:closeModal}]); };
+      b.onkeydown = ev => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); b.click(); return; }
+        const direction={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowDown:[0,1],ArrowUp:[0,-1]}[ev.key];
+        if (!direction) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const current=b.getBoundingClientRect(), cx=current.x+current.width/2, cy=current.y+current.height/2;
+        const nearest=$$('#tm .tmb').filter(other=>other!==b).map(other=>{
+          const r=other.getBoundingClientRect(),dx=r.x+r.width/2-cx,dy=r.y+r.height/2-cy;
+          const forward=dx*direction[0]+dy*direction[1],side=Math.abs(dx*direction[1]-dy*direction[0]);
+          return {other,forward,score:Math.hypot(dx,dy)+side*2};
+        }).filter(entry=>entry.forward>0).sort((a,b)=>a.score-b.score)[0];
+        if(nearest) nearest.other.focus();
+      };
+    });
   };
   draw();
 }
