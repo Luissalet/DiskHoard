@@ -42,9 +42,21 @@ The **Split into ZIPs** panel (the "Partir en ZIPs" tab, the start-screen button
 
 HTTP: `POST /api/zip/plan`, `POST /api/zip/split`, `GET /api/zip/job?id=`, `POST /api/zip/cancel` (same token as the other `/api` routes).
 
+## Ollama backup copies
+
+Since Ollama 0.40 a model is upgraded in the background the first time it runs, and the original build is kept as a backup. The **Ollama backup copies** panel (the "Copias de Ollama" tab and the start-screen button) finds what can be freed in the models folder, says whether each model still works without it, and frees only what is safe.
+
+- **What it finds:** `ggml_backup` (the pre-migration build of a model whose migrated build exists), `orphan_blob` (blobs no manifest uses), `partial` (abandoned `-partial` downloads), `orphan_metadata` (metadata cache of a blob that is gone) and `backup_dir` / `backup_file` (folders such as `blobs.old` or `manifests.bak-*` left by a manual migration). Each item has its size, the owning model when known and the reasons it is or is not safe.
+- **Safe means verified:** a backup is only safe when the migrated build's manifest and every one of its blobs exist with the sizes the manifest declares, and the backup's own blobs are not shared with any other model. Orphans must be older than one hour (abandoned partials, a week) and the store must not have been written in the last two minutes. Any unreadable manifest, dangling link, odd digest or unverifiable path makes every orphan unsafe, and unsafe items are never offered for deletion.
+- **Models folder:** `OLLAMA_MODELS`, then the running server's folder, then the default `~/.ollama/models`; a folder that does not look like an Ollama store is refused.
+- **Free:** the dry run is the default and shows the plan with the exact `ollama rm <digest>` commands. The real run needs explicit confirmation and goes to the Recycle Bin (files) or, if chosen, deletes permanently. A migration backup that is a manifest entry is removed with `ollama rm`, never by editing Ollama's manifests (this is irreversible and needs the server running). It refuses while Ollama has models loaded, a pull / run / create / push process is active, or the folder cannot be verified, and it rescans afterwards to confirm what was removed.
+- **Audit:** every dry run, refusal and free is appended to `data/ollama-free-audit.jsonl` (when, mode, caller `ui` / `agent`, outcome, bytes).
+
+HTTP: `GET /api/ollama/backups?dir=`, `GET /api/ollama/audit?limit=`, `POST /api/ollama/free` (body `ids`, `dir`, `dry_run`, `confirm`, `mode`). MCP: `disk_ollama_backups` (read only) and `disk_ollama_free` (dry run by default; `confirm=true` to apply).
+
 ## MCP tools
 
-`mcp_server.py` exposes 18 stdio tools and starts the local app if needed:
+`mcp_server.py` exposes 20 stdio tools and starts the local app if needed:
 
 | Tools | Purpose |
 | --- | --- |
@@ -54,6 +66,7 @@ HTTP: `POST /api/zip/plan`, `POST /api/zip/split`, `GET /api/zip/job?id=`, `POST
 | `disk_explain`, `disk_script`, `disk_delete`, `disk_rescan` | Explain a target, prepare a script, delete or refresh a subtree. |
 | `disk_zip_plan`, `disk_zip_split` | Plan (dry run) or create ZIPs of a folder that each stay under a size limit; `too_large` handling `skip`, `fail`, `split` or `move` (needs `confirm=true`). |
 | `disk_zip_status`, `disk_zip_cancel` | Follow or cancel the ZIP job; a cancel leaves no half-written part. |
+| `disk_ollama_backups`, `disk_ollama_free` | List Ollama migration backups and orphan blobs with what is safe to free; free them (dry run by default, `confirm=true` to apply, audit logged). |
 
 See [the Spanish README](README.es.md) for the full rule catalogue and examples.
 

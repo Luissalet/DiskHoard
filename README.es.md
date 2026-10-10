@@ -143,9 +143,21 @@ límite**, para webs que limitan el tamaño por fichero. Sustituye al antiguo «
 Rutas HTTP (mismo token que el resto de `/api`): `POST /api/zip/plan`, `POST /api/zip/split`,
 `GET /api/zip/job?id=` (sin `id`, el último) y `POST /api/zip/cancel`. Los errores devuelven 400 con `error`.
 
+## Copias de Ollama
+
+Desde Ollama 0.40 un modelo se actualiza en segundo plano la primera vez que se ejecuta y la versión original se conserva como copia de seguridad. La pestaña **Copias de Ollama** (y el botón de la pantalla de inicio) busca en la carpeta de modelos lo que se puede liberar, dice si cada modelo sigue funcionando sin ello y libera solo lo seguro.
+
+- **Qué encuentra:** `ggml_backup` (el build previo a la migración de un modelo cuyo build migrado existe), `orphan_blob` (blobs que ningún manifiesto usa), `partial` (descargas `-partial` abandonadas), `orphan_metadata` (caché de metadatos de un blob que ya no está) y `backup_dir` / `backup_file` (carpetas como `blobs.old` o `manifests.bak-*` de una migración manual). Cada elemento trae su tamaño, el modelo al que pertenece si se sabe y los motivos por los que es seguro o no.
+- **Seguro significa verificado:** una copia solo es segura si el manifiesto del build migrado y todos sus blobs existen con el tamaño que declara el manifiesto, y los blobs de la copia no los comparte ningún otro modelo. Los huérfanos deben tener más de una hora (los parciales abandonados, una semana) y el almacén no puede haberse escrito en los últimos dos minutos. Un manifiesto ilegible, un enlace roto, un digest raro o una ruta no verificable vuelve inseguros todos los huérfanos, y lo inseguro nunca se ofrece para borrar.
+- **Carpeta de modelos:** `OLLAMA_MODELS`, luego la del servidor en marcha, luego `~/.ollama/models`; una carpeta que no parece un almacén de Ollama se rechaza.
+- **Liberar:** por defecto es una simulación que enseña el plan con los comandos `ollama rm <digest>` exactos. La ejecución real exige confirmación explícita y manda a la Papelera (ficheros) o, si lo eliges, borra definitivamente. Una copia que es una entrada de manifiesto se elimina con `ollama rm`, nunca editando los manifiestos de Ollama (es irreversible y necesita el servidor en marcha). Se niega mientras Ollama tenga modelos cargados, haya un proceso pull / run / create / push activo o no se pueda verificar la carpeta, y vuelve a escanear después para comprobar lo eliminado.
+- **Registro:** cada simulación, rechazo y liberación se anota en `data/ollama-free-audit.jsonl` (cuándo, modo, origen `ui` / `agent`, resultado, bytes); la interfaz lo enseña en «Registro».
+
+HTTP: `GET /api/ollama/backups?dir=`, `GET /api/ollama/audit?limit=`, `POST /api/ollama/free` (cuerpo `ids`, `dir`, `dry_run`, `confirm`, `mode`). MCP: `disk_ollama_backups` (solo lectura) y `disk_ollama_free` (simulación por defecto; `confirm=true` para aplicar).
+
 ## Control por agente (MCP)
 
-`mcp_server.py` es un servidor MCP por stdio, también sin dependencias. Expone 18
+`mcp_server.py` es un servidor MCP por stdio, también sin dependencias. Expone 20
 herramientas que reenvía a la app en marcha (y si no está en marcha, la arranca):
 
 | Herramienta | Qué hace |
@@ -164,6 +176,8 @@ herramientas que reenvía a la app en marcha (y si no está en marcha, la arranc
 | `disk_zip_plan` | plan en seco para partir una carpeta en ZIPs de un tamaño máximo: partes, tamaños y ficheros demasiado grandes |
 | `disk_zip_split` | crea los ZIPs (`part_001.zip`…) garantizando el límite; `too_large`: `skip`, `fail`, `split` (volúmenes `.zip.001`) o `move` (con `confirm=true`); espera al final o devuelve un trabajo |
 | `disk_zip_status` / `disk_zip_cancel` | progreso y resumen del trabajo de ZIPs / cancelarlo sin dejar partes a medias |
+| `disk_ollama_backups` | copias que Ollama guarda tras migrar modelos y blobs huérfanos, con tamaños y qué es seguro liberar (solo lectura) |
+| `disk_ollama_free` | libera lo marcado como seguro: simulación por defecto, `confirm=true` para aplicar, Papelera o `mode="permanent"`; se niega si Ollama está ocupado |
 
 Partir en ZIPs no borra nada: solo lee el origen y escribe en la carpeta de salida (que debe estar vacía o ser
 nueva). `too_large="move"` es lo único que toca el origen, y exige `confirm=true`.
@@ -283,6 +297,7 @@ Tests: `python -m pytest -q tests` (solo necesita pytest).
 - Solo Windows. El motor de escaneo es portable, pero la papelera y la enumeración de
   unidades usan la API de Windows.
 - La interfaz está solo en castellano.
+- Copias de Ollama se basa en la estructura de Ollama 0.40 (listas de manifiestos con builds `ggml` y `llamacpp`) reconstruida a partir de sus notas de versión; con versiones anteriores solo detecta huérfanos y carpetas de copia. Una copia `ggml` se elimina con `ollama rm` y exige el servidor en marcha.
 - Partir en ZIPs no incluye carpetas vacías, no sigue enlaces simbólicos ni uniones y no cifra ni protege con
   contraseña. Con Deflate el plan es un máximo y el resultado puede salir en menos partes; un fichero modificado
   mientras se lee se guarda con el tamaño que tenía al empezar (y se avisa).

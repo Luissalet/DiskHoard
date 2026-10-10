@@ -44,12 +44,12 @@ def test_catalog_first_lines_fit_the_tool_index():
         assert "readOnlyHint" in t["annotations"]
 
 
-WRITERS = {"disk_delete", "disk_zip_split", "disk_zip_cancel"}
+WRITERS = {"disk_delete", "disk_ollama_free", "disk_zip_split", "disk_zip_cancel"}
 
 
-def test_only_delete_is_destructive():
+def test_only_deleting_tools_are_destructive():
     destructive = [t["name"] for t in agentmod.CATALOG if t["annotations"]["destructiveHint"]]
-    assert destructive == ["disk_delete"]
+    assert destructive == ["disk_delete", "disk_ollama_free"]
     assert all(t["annotations"]["readOnlyHint"] for t in agentmod.CATALOG if t["name"] not in WRITERS)
     assert not any(t["annotations"]["readOnlyHint"] for t in agentmod.CATALOG if t["name"] in WRITERS)
 

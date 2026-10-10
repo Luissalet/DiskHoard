@@ -19,6 +19,7 @@ import os
 import time
 
 from . import junk as junkmod
+from . import ollama_backups as ob
 from . import zipsplit
 from .winfs import IS_WIN, long_path, norm_display
 
@@ -154,6 +155,41 @@ CATALOG = [
           "Re-read one subfolder and splice fresh numbers into the scan. Keywords: refrescar, actualizar, rescan.\n"
           "Seconds instead of a full scan. Use it after deleting outside the app or when a folder changed.",
           {"path": _PATH}, idempotent=True),
+    _tool("disk_ollama_backups",
+          "Ollama migration backup copies and orphan blobs. Keywords: copias de Ollama, blobs huérfanos, liberar GB.\n"
+          "Read-only, needs no scan. Ollama 0.40+ migrates old models in the background and keeps the original (ggml) "
+          "copy as a backup until it is removed with `ollama rm`; that can be tens of GB. This reads the Ollama models "
+          "folder (models_dir, else OLLAMA_MODELS, else ~/.ollama/models) and lists: migration backups, blobs no "
+          "manifest references (orphans), abandoned partial downloads, orphan metadata and backup-looking folders or "
+          "files, each with size, the model it belonged to and `safe`. An item is safe only when the migrated model's "
+          "manifest and all its blobs exist, every manifest in the store is readable and nothing is recent. Returns "
+          "reclaimable_bytes (safe items only), the reasons for the rest, the models with completeness, and whether "
+          "Ollama is busy (loaded models, a pull in progress).\n"
+          "Sinónimos: copias de seguridad de Ollama, backups de la migración, blobs sobrantes, cuánto puedo liberar de "
+          "Ollama, modelos duplicados tras actualizar.",
+          {"models_dir": {"type": "string", "description": "Ollama models folder; default OLLAMA_MODELS or ~/.ollama/models"},
+           "kind": {"type": "string", "enum": ["all"] + list(ob.KINDS), "default": "all"},
+           "safe_only": {"type": "boolean", "default": False},
+           "limit": _LIMIT(100, 500)},
+          idempotent=True),
+    _tool("disk_ollama_free",
+          "Free Ollama backups and orphans marked safe. Keywords: liberar copias de Ollama, borrar backups.\n"
+          "Frees ONLY items disk_ollama_backups marks safe, re-detected at call time. dry_run=true by default (changes "
+          "nothing; returns the plan, sizes and anything that blocks it); a real run needs dry_run=false AND confirm=true: "
+          "show the user the list and sizes first. Refuses while Ollama has loaded models, is pulling or creating, a "
+          "download is in progress, or the models folder cannot be verified. Files go to the Recycle Bin (mode='trash', "
+          "default; it frees disk only once emptied) or are deleted for good (mode='permanent'); migration backups are "
+          "removed with `ollama rm <digest>` (the way Ollama documents), which needs the Ollama server running and cannot "
+          "be undone: downgrading below 0.40 would then need a re-pull. Every call is appended to data/ollama-free-audit.jsonl.\n"
+          "Sinónimos: libera lo que sobra de Ollama, borra las copias de la migración, limpia blobs huérfanos de Ollama.",
+          {"ids": {"type": "array", "items": {"type": "string"}, "maxItems": 500,
+                   "description": "Item ids from disk_ollama_backups; omit for every safe item"},
+           "models_dir": {"type": "string"},
+           "dry_run": {"type": "boolean", "default": True},
+           "confirm": {"type": "boolean", "default": False,
+                       "description": "Must be true (with dry_run=false) to delete anything. Say so to the user first."},
+           "mode": {"type": "string", "enum": ["trash", "permanent"], "default": "trash"}},
+          read_only=False, destructive=True),
     _tool("disk_zip_plan",
           "Dry-run: plan ZIP parts under a size limit. Keywords: partir en zips, dividir en partes, zip de 990 MB.\n"
           "Takes a folder and says which files go into part_001.zip, part_002.zip... so that every part stays "
@@ -249,7 +285,9 @@ INSTRUCTIONS = (
     "the exact paths and their safety level to the user; use mode='permanent' only when they ask for it "
     "explicitly. When unsure, hand them a disk_script instead. To split a folder into ZIPs under a size limit "
     "(upload sites, e-mail) run disk_zip_plan first, then disk_zip_split; too_large='move' moves the user's "
-    "files, so ask before using it."
+    "files, so ask before using it. After an Ollama update, disk_ollama_backups lists the backup copies it keeps of "
+    "migrated models and orphan blobs; run disk_ollama_free with dry_run first and only free for real (dry_run=false, "
+    "confirm=true) after the user has seen the list."
 )
 
 
@@ -792,4 +830,36 @@ class Agent:
         r["human"] = _fmt(r.get("size", 0))
         r["delta_human"] = ("-" if r.get("delta", 0) < 0 else "+") + _fmt(abs(r.get("delta", 0)))
         self._note("disk_rescan", "%s (%s)" % (path or sc.root_display, r["delta_human"]))
+        return r
+
+    # ---- copias de Ollama
+    def t_disk_ollama_backups(self, models_dir=None, kind="all", safe_only=False, limit=100):
+        r = ob.scan(models_dir or None)
+        if r.get("error"):
+            return {"error": r["error"], "models_dir": r["models_dir"], "candidates": r["candidates"]}
+        items = [i for i in r["items"] if (kind == "all" or i["kind"] == kind) and (not safe_only or i["safe"])]
+        shown = items[:int(limit)]
+        out = {k: r[k] for k in ("models_dir", "source", "ollama", "layout", "reclaimable_bytes", "reclaimable_human",
+                                 "unsafe_bytes", "unsafe_human", "counts", "models", "problems", "busy", "warnings",
+                                 "can_free", "free_blockers")}
+        out.update({"matching": len(items), "shown": len(shown), "items": shown})
+        out["hint"] = ("Nothing to free." if not r["items"] else
+                       "Run disk_ollama_free with dry_run=true first; free for real only with dry_run=false and "
+                       "confirm=true after showing the user these items.")
+        self._note("disk_ollama_backups", "%d items, %s reclaimable" % (len(r["items"]), r["reclaimable_human"]),
+                   {"models_dir": r["models_dir"]})
+        return out
+
+    def t_disk_ollama_free(self, ids=None, models_dir=None, dry_run=True, confirm=False, mode="trash"):
+        r = ob.free(models_dir or None, ids=ids, dry_run=bool(dry_run), confirm=bool(confirm), mode=mode,
+                    data_dir=self.srv.data_dir(), caller="agent")
+        if r.get("error"):
+            self._note("disk_ollama_free", "refused: %s" % r["error"][:90], {"dry_run": bool(dry_run), "mode": mode})
+            return r
+        if r["dry_run"]:
+            self._note("disk_ollama_free", "dry run: %d items, %s%s" % (
+                len(r["planned"]), r["planned_human"], ", blocked" if r["blocked"] else ""), {"mode": mode})
+        else:
+            self._note("disk_ollama_free", "%d freed (%s), %d failed" % (
+                len(r["done"]), r["freed_human"], len(r["failed"])), {"mode": mode})
         return r

@@ -236,6 +236,27 @@ td.selcell:hover{background:var(--hoard-elevated);box-shadow:inset 2px 0 0 var(-
 .zjoin{font-family:Consolas,monospace;font-size:11.5px;background:var(--hoard-sunken);border:1px solid var(--line);
   border-radius:6px;padding:6px 9px;margin:4px 0 8px;word-break:break-all;user-select:all}
 
+/* ---------- copias de Ollama ---------- */
+#ollsec{flex:1;display:none;flex-direction:column;min-height:0}
+#ollsec .olbody{flex:1;overflow:auto;padding:22px 24px 40px}
+.olwrap{max-width:1100px;margin:0 auto}
+.olwrap h2{font-family:var(--hoard-font-serif);font-size:22px;margin:0 0 4px}
+.olrow{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.olrow input[type=text]{flex:1;min-width:260px}
+.olmeta{color:var(--mut);font-size:12px;margin-top:8px}
+.olmeta b{color:var(--tx)}
+.oltbl{margin-top:14px;width:100%;table-layout:auto}
+.oltbl td{vertical-align:top;white-space:normal}
+.oltbl td.n,.oltbl th.n{text-align:right;white-space:nowrap}
+.oltbl .why{display:block;color:var(--dim);font-size:11.5px;margin-top:3px}
+.oltbl .p{font-family:Consolas,monospace;font-size:11.5px;word-break:break-all;color:var(--dim)}
+.olmodes{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--mut);margin-top:12px}
+.olmodes label{display:flex;gap:6px;align-items:center}
+.olplan div{padding:2px 0}
+.olmodels{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.olmodels span{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:11.5px;color:var(--mut)}
+.olmodels span.bad{border-color:var(--hoard-danger);color:var(--hoard-text)}
+
 /* modal */
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.66);display:none;z-index:50;
   align-items:center;justify-content:center;padding:22px}
@@ -291,7 +312,8 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
     <div class="chips" id="quick"></div>
 
     <div class="sect">Herramientas</div>
-    <div class="chips"><div class="chip" id="zOpenStart">Partir una carpeta en ZIPs <span class="dim">para webs con límite por fichero</span></div></div>
+    <div class="chips"><div class="chip" id="zOpenStart">Partir una carpeta en ZIPs <span class="dim">para webs con límite por fichero</span></div>
+      <div class="chip" id="olOpenStart">Copias de Ollama <span class="dim">backups de la migración y ficheros huérfanos</span></div></div>
 
     <div class="sect">O una carpeta concreta</div>
     <div class="pathrow">
@@ -337,6 +359,7 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
       <div class="tab" data-t="types">Por tipo</div>
       <div class="tab" data-t="stale">Sin tocar</div>
       <div class="tab" data-t="zip" id="tabZip">Partir en ZIPs</div>
+      <div class="tab" data-t="ollama" id="tabOllama">Copias de Ollama</div>
     </div>
 
     <div class="crumbbar">
@@ -426,6 +449,28 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
         <div class="zcur" id="zProgCur"></div>
       </div>
       <div class="zres" id="zRes"></div>
+    </div></div>
+  </section>
+
+  <!-- ============ COPIAS DE OLLAMA ============ -->
+  <section id="ollsec">
+    <header>
+      <div class="brand">Disk<span>Hoard</span></div>
+      <b>Copias de Ollama</b>
+      <div style="flex:1"></div>
+      <button id="olAudit" class="ghost">Registro</button>
+      <button id="olBack">← Volver</button>
+    </header>
+    <div class="olbody"><div class="olwrap">
+      <h2>Copias de Ollama</h2>
+      <p class="mut" style="margin:0">Desde Ollama 0.40 los modelos viejos se migran solos y se conserva el original como copia de
+      seguridad hasta que alguien la borra: puede ser un modelo entero. Aquí se listan esas copias, los ficheros que ningún
+      modelo usa y las carpetas de backup, y solo se ofrece liberar lo que es seguro: la versión migrada tiene que estar
+      completa y no puede haber nada reciente ni ilegible. Esta pantalla solo lee hasta que confirmas.</p>
+
+      <div class="olrow"><input type="text" id="olDir" placeholder="Por defecto: la carpeta de modelos de Ollama (OLLAMA_MODELS)" spellcheck="false">
+        <button id="olScan" class="primary">Detectar</button></div>
+      <div id="olRes"><div class="empty">Detectando…</div></div>
     </div></div>
   </section>
 </div>
@@ -691,6 +736,7 @@ $('#bClear').onclick = () => { S.sel.clear(); renderExplorer(); updateSel(); };
 /* ================= pestañas ================= */
 $$('.tab').forEach(t => t.onclick = () => {
   if (t.dataset.t === 'zip') { openZip('main', S.path); return; }
+  if (t.dataset.t === 'ollama') { openOllama('main'); return; }
   showTab(t.dataset.t);
   if (S.tab === 'hot') renderHot();
   if (S.tab === 'junk') renderJunk();
@@ -1053,6 +1099,145 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ================= copias de Ollama ================= */
+const O = {from: 'start', data: null, sel: new Set(), run: false};
+const ovv = id => document.getElementById(id);
+const O_KIND = {ggml_backup: 'Copia de la migración', orphan_blob: 'Fichero huérfano', partial: 'Descarga a medias',
+                orphan_metadata: 'Metadatos huérfanos', backup_dir: 'Carpeta de copia', backup_file: 'Fichero de copia'};
+function openOllama(from) {
+  O.from = from;
+  $('#start').style.display = 'none'; $('#main').style.display = 'none';
+  ovv('ollsec').style.display = 'flex';
+  ollDetect();
+}
+function closeOllama() {
+  ovv('ollsec').style.display = 'none';
+  if (O.from === 'main') $('#main').style.display = 'flex'; else $('#start').style.display = 'block';
+}
+ovv('olOpenStart').onclick = () => openOllama('start');
+ovv('olBack').onclick = closeOllama;
+ovv('olScan').onclick = () => ollDetect();
+ovv('olDir').onkeydown = e => { if (e.key === 'Enter') ollDetect(); };
+ovv('olAudit').onclick = async () => {
+  const r = await get('/api/ollama/audit', {limit: 40});
+  const rows = (r.items || []).slice().reverse().map(e => `<div><span>${esc(e.when || '')}</span>
+    <b>${e.dry_run ? 'simulacro' : esc(e.outcome || '')}</b> ${esc(e.caller || '')} · ${fb(e.freed_bytes || e.planned_bytes || 0)}
+    ${e.reason ? '· ' + esc(e.reason) : ''}</div>`).join('');
+  modal('Registro de Ollama', `<div class="alog">${rows || 'Nada todavía.'}</div>`, [{label: 'Cerrar', fn: closeModal}]);
+};
+
+async function ollDetect() {
+  ovv('olRes').innerHTML = '<div class="empty">Detectando…</div>';
+  const r = await get('/api/ollama/backups', {dir: ovv('olDir').value.trim()});
+  O.data = r;
+  O.sel = new Set((r.items || []).filter(i => i.safe).map(i => i.id));
+  ollRender();
+}
+function ollSelItems() { return ((O.data && O.data.items) || []).filter(i => O.sel.has(i.id) && i.safe); }
+function ollSelBytes() { return ollSelItems().reduce((a, i) => a + i.bytes, 0); }
+
+function ollRender() {
+  const r = O.data, out = ovv('olRes');
+  if (!r || r.error) {
+    const c = ((r && r.candidates) || []).map(x => `<div><span>${esc(x.path)}</span>
+      <span class="mut">${esc(x.source)}${x.has_blobs ? '' : x.exists ? ' · sin blobs/' : ' · no existe'}</span></div>`).join('');
+    out.innerHTML = `<div class="warn" style="margin-top:14px">${esc((r && r.error) || 'No se pudo leer.')}</div>
+      ${c ? `<div class="sect">Sitios donde se ha mirado</div><div class="list">${c}</div>` : ''}`;
+    return;
+  }
+  const items = r.items || [], safeN = items.filter(i => i.safe).length;
+  const srcTxt = {arg: 'la ruta indicada', env: 'la variable OLLAMA_MODELS', registry: 'la variable OLLAMA_MODELS del usuario',
+                  default: 'la carpeta por defecto'}[r.source] || r.source;
+  const o = r.ollama || {};
+  const broken = (r.models || []).filter(m => !m.complete);
+  const rows = items.map(i => {
+    const isSafe = i.safe;
+    return `<tr>
+      <td>${isSafe ? `<input type="checkbox" class="olck" data-id="${esc(i.id)}" ${O.sel.has(i.id) ? 'checked' : ''}>` : ''}</td>
+      <td><b>${esc(O_KIND[i.kind] || i.kind)}</b>${i.model ? `<div>${esc(i.model)}</div>` : ''}
+        <div class="p">${esc(i.rel || i.name || i.path)}</div>
+        ${i.how === 'ollama_rm' ? `<span class="why">Se quita con <kbd>${esc(i.command)}</kbd>${i.shared_blobs ? ' · ' + i.shared_blobs + ' fichero(s) compartidos se conservan' : ''}</span>` : ''}
+        ${(i.reasons || []).map(x => `<span class="why">${esc(x)}</span>`).join('')}</td>
+      <td class="n"><b>${fb(i.bytes)}</b></td>
+      <td><span class="badge ${isSafe ? 'b-safe' : 'b-review'}">${isSafe ? 'seguro' : 'no seguro'}</span></td></tr>`;
+  }).join('');
+  out.innerHTML = `
+    <div class="olmeta">Carpeta: <b>${esc(r.models_dir)}</b> (${esc(srcTxt)}) · Ollama ${o.version ? '<b>' + esc(o.version) + '</b>' : 'versión desconocida'}
+      · servidor ${o.running ? '<b>en marcha</b>' + (o.loaded && o.loaded.length ? ' (cargados: ' + esc(o.loaded.join(', ')) + ')' : '') : 'parado'}
+      · almacén ${r.layout.manifests_v2 ? 'v2 (0.40+)' : 'clásico'}${r.layout.lists ? ' con ' + r.layout.lists + ' lista(s) de manifiestos' : ''}</div>
+    ${(r.busy || []).map(b => `<div class="warn" style="margin-top:12px"><b>Ahora no se puede borrar.</b> ${esc(b)}</div>`).join('')}
+    ${(r.free_blockers || []).length ? `<div class="warn" style="margin-top:12px"><b>Esta carpeta no se puede verificar para borrar:</b> ${esc(r.free_blockers.join('; '))}.</div>` : ''}
+    ${(r.warnings || []).map(w => `<div class="ok" style="margin-top:12px">${esc(w)}</div>`).join('')}
+    ${(r.problems || []).length ? `<div class="warn" style="margin-top:12px"><b>Hay cosas ilegibles en el almacén</b>, así que no se da por seguro ningún fichero huérfano:
+      ${r.problems.slice(0, 4).map(esc).join('; ')}.</div>` : ''}
+    <div class="kpis" style="padding:0;margin-top:14px">
+      <div class="kpi"><div class="v">${fb(r.reclaimable_bytes)}</div><div class="l">recuperable con seguridad (${safeN} elementos)</div></div>
+      <div class="kpi"><div class="v">${fb(r.unsafe_bytes)}</div><div class="l">detectado pero NO seguro</div></div>
+      <div class="kpi"><div class="v">${fn((r.models || []).length)}</div><div class="l">modelos${broken.length ? ' · ' + broken.length + ' incompleto(s)' : ' · todos completos'}</div></div>
+      <div class="kpi"><div class="v">${fb(r.layout.blob_bytes)}</div><div class="l">${fn(r.layout.blobs)} blobs en total</div></div></div>
+    <div class="olmodels">${(r.models || []).map(m => `<span class="${m.complete ? '' : 'bad'}" title="${esc((m.missing || []).map(x => (x.blob || '').slice(7, 19) + ' ' + x.why).join('; '))}">${esc(m.name)}${m.runners && m.runners.length ? ' · ' + esc(m.runners.join('+')) : ''}${m.complete ? '' : ' · INCOMPLETO'}</span>`).join('')}</div>
+    ${items.length ? `<table class="oltbl"><thead><tr><th style="width:28px"><input type="checkbox" id="olAll" ${safeN && ollSelItems().length === safeN ? 'checked' : ''}></th>
+      <th>Qué es</th><th class="n">Tamaño</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="olmodes"><b>Los ficheros van a:</b>
+        <label><input type="radio" name="olMode" value="trash" checked> la Papelera (reversible; el disco se libera al vaciarla)</label>
+        <label><input type="radio" name="olMode" value="permanent"> borrado definitivo</label></div>
+      <div class="zbtns"><button id="olSim">Simular (no toca nada)</button>
+        <button class="primary" id="olFree" ${r.can_free && ollSelItems().length ? '' : 'disabled'}>Liberar ${fb(ollSelBytes())}…</button></div>
+      <div class="note" style="margin-top:8px">Las copias de la migración se quitan con <kbd>ollama rm</kbd> (necesita el servidor de Ollama en marcha, sin modelos cargados) y no tienen vuelta atrás.</div>`
+      : '<div class="empty">No hay copias ni ficheros huérfanos: no hay nada que liberar.</div>'}
+    <div id="olOut"></div>`;
+  $$('.olck').forEach(c => c.onchange = () => { c.checked ? O.sel.add(c.dataset.id) : O.sel.delete(c.dataset.id); ollRender(); });
+  if (ovv('olAll')) ovv('olAll').onchange = e => {
+    O.sel = e.target.checked ? new Set(items.filter(i => i.safe).map(i => i.id)) : new Set(); ollRender(); };
+  if (ovv('olSim')) ovv('olSim').onclick = ollSimulate;
+  if (ovv('olFree')) ovv('olFree').onclick = ollConfirm;
+}
+function ollMode() { const x = document.querySelector('input[name=olMode]:checked'); return x ? x.value : 'trash'; }
+function ollPlanHtml(p) {
+  return `<div class="list olplan">${p.planned.map(i => `<div><span>${esc(i.model ? i.model + ' · ' : '')}${esc(i.path)}
+    ${i.command ? '<br><kbd>' + esc(i.command) + '</kbd>' : ''}</span><span class="mut">${fb(i.bytes)}</span></div>`).join('')}</div>`;
+}
+async function ollSimulate() {
+  const ids = ollSelItems().map(i => i.id);
+  if (!ids.length) { toast('No hay nada seleccionado'); return; }
+  const p = await post('/api/ollama/free', {dir: ovv('olDir').value.trim(), ids, dry_run: true, mode: ollMode()});
+  if (p.error) { ovv('olOut').innerHTML = `<div class="warn" style="margin-top:14px">${esc(p.error)}</div>`; return; }
+  ovv('olOut').innerHTML = `<div class="sect">Simulacro · no se ha tocado nada</div>
+    ${p.blocked.length ? p.blocked.map(b => `<div class="warn">${esc(b)}</div>`).join('') : '<div class="ok">Ahora mismo se podría liberar. Nada ha cambiado.</div>'}
+    <p><b>${p.planned.length}</b> elemento(s) · <b>${fb(p.planned_bytes)}</b></p>${ollPlanHtml(p)}
+    ${p.refused.length ? `<div class="sect">Rechazado</div>${p.refused.map(x => `<div class="ok">${esc(x.id)}: ${esc(x.reasons.join(' '))}</div>`).join('')}` : ''}`;
+}
+function ollConfirm() {
+  const items = ollSelItems(), mode = ollMode();
+  if (!items.length) return;
+  const hasRm = items.some(i => i.how === 'ollama_rm');
+  modal('Liberar copias de Ollama', `
+    ${hasRm ? `<div class="warn"><b>Sin vuelta atrás.</b> Las copias de la migración se quitan con <kbd>ollama rm</kbd>. Si luego vuelves a una
+      versión de Ollama anterior a la 0.40, tendrás que volver a descargar esos modelos.</div>` : ''}
+    ${items.some(i => i.how === 'file') ? (mode === 'permanent'
+      ? '<div class="warn"><b>Borrado definitivo.</b> Los ficheros no pasan por la Papelera.</div>'
+      : '<div class="ok">Los ficheros van a la Papelera: puedes restaurarlos, pero el disco no se libera hasta vaciarla. Si alguno pesa más que la Papelera, Windows lo borra directamente.</div>') : ''}
+    <p><b>${items.length}</b> elemento${items.length > 1 ? 's' : ''} · <b>${fb(ollSelBytes())}</b></p>
+    <div class="list">${items.map(i => `<div><span>${esc(i.model ? i.model + ' · ' : '')}${esc(i.rel || i.name || i.path)}</span><span class="mut">${fb(i.bytes)}</span></div>`).join('')}</div>`,
+    [{label: 'Cancelar', fn: closeModal}, {label: 'Sí, liberar', cls: 'danger', fn: ollRun}]);
+}
+async function ollRun() {
+  if (O.run) return;
+  O.run = true;
+  const ids = ollSelItems().map(i => i.id);
+  modal('Liberando…', '<div>Trabajando; las copias grandes pueden tardar.</div>', []);
+  const r = await post('/api/ollama/free', {dir: ovv('olDir').value.trim(), ids, dry_run: false, confirm: true, mode: ollMode()});
+  O.run = false;
+  if (r.error) {
+    modal('No se ha borrado nada', `<div class="warn">${esc(r.error)}</div>`, [{label: 'Cerrar', fn: closeModal}]);
+    return;
+  }
+  modal('Hecho', `<div class="ok">Liberados <b>${fb(r.freed_bytes)}</b> en ${r.done.length} elemento(s).${r.note ? ' ' + esc(r.note) : ''}</div>
+    ${r.failed.length ? `<p class="mut">No se pudieron borrar ${r.failed.length}:</p><div class="list">${r.failed.map(f => '<div>' + esc(f.path + ': ' + f.error) + '</div>').join('')}</div>` : ''}
+    <p class="mut">Queda anotado en el registro (${esc(r.audit || '')}).</p>`,
+    [{label: 'Cerrar', cls: 'primary', fn: () => { closeModal(); ollDetect(); }}]);
+}
+
 /* ================= partir en ZIPs ================= */
 const Z = {from: 'start', job: null, timer: null, auto: true};
 const zv = id => document.getElementById(id);
@@ -1228,6 +1413,7 @@ async function agentPoll() {
       const last = r.items[r.items.length - 1];
       $('#agent span').textContent = 'MCP · ' + last.tool.replace('disk_', '') + ' · ' + last.summary;
       $('#agent').classList.add('on');
+      if ($('#ollsec').style.display === 'flex' && !O.run && r.items.some(i => /ollama/.test(i.tool))) ollDetect();
       const changes = r.items.some(i => ['disk_scan', 'disk_delete', 'disk_rescan'].includes(i.tool));
       if (changes && !first) await followAgent();
       else if (first) await followAgent();
@@ -1236,7 +1422,7 @@ async function agentPoll() {
   AG.timer = setTimeout(agentPoll, 2500);
 }
 async function followAgent() {
-  if ($('#zipsec').style.display === 'flex') return;   // no le quitamos la pantalla a quien está partiendo ZIPs
+  if ($('#zipsec').style.display === 'flex' || $('#ollsec').style.display === 'flex') return;   // no le quitamos la pantalla a quien está partiendo ZIPs o liberando copias
   const p = await get('/api/progress');
   if (p.idle) return;
   const scanningOn = $('#scanning').style.display === 'flex';

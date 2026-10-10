@@ -17,6 +17,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from . import __version__
 from . import agent as agentmod
 from . import junk as junkmod
+from . import ollama_backups
 from . import scanner as scanmod
 from . import zipsplit
 from .hoard_link import family
@@ -521,6 +522,20 @@ def api_zip_cancel(jid=None):
     return {"ok": True, "job": job.id, "was_running": job.running}
 
 
+# --------------------------------------------------------- copias de Ollama
+
+def api_ollama_backups(models_dir=None):
+    """Solo lectura: copias de la migracion, huerfanos y su estado."""
+    return ollama_backups.scan(models_dir or None)
+
+
+def api_ollama_free(body):
+    """Simulacro por defecto; borrar de verdad exige dry_run=false y confirm=true."""
+    return ollama_backups.free(body.get("dir") or None, ids=body.get("ids"),
+                               dry_run=body.get("dry_run", True) is not False, confirm=bool(body.get("confirm")),
+                               mode=body.get("mode") or "trash", data_dir=data_dir(), caller="ui")
+
+
 # -------------------------------------------------------------------- HTTP
 
 class Handler(BaseHTTPRequestHandler):
@@ -597,6 +612,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(api_exts())
         if p == "/api/job":
             return self._json(api_job(one("id")))
+        if p == "/api/ollama/backups":
+            return self._json(api_ollama_backups(unquote(one("dir"))))
+        if p == "/api/ollama/audit":
+            return self._json({"items": ollama_backups.read_audit(data_dir(), int(one("limit", "30") or 30))})
         if p == "/api/zip/job":
             out = api_zip_job(one("id") or None)
             return self._json(out, 404 if "error" in out else 200)
@@ -643,6 +662,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 out = api_zip_cancel(body.get("id") or body.get("job") or None)
             return self._json(out, 400 if "error" in out else 200)
+        if p == "/api/ollama/free":
+            out = api_ollama_free(body)
+            if out.get("error"):
+                AGENT._note("ollama_free", "refused: %s" % out["error"][:90])
+            else:
+                AGENT._note("ollama_free", "%s: %d items, %s" % (
+                    "dry run" if out["dry_run"] else "freed", len(out["planned"] if out["dry_run"] else out["done"]),
+                    out["planned_human"] if out["dry_run"] else out["freed_human"]))
+            return self._json(out, 400 if out.get("error") else 200)
         if p == "/api/quit":
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return self._json({"ok": True})
