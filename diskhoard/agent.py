@@ -157,48 +157,45 @@ CATALOG = [
           {"path": _PATH}, idempotent=True),
     _tool("disk_ollama_backups",
           "Ollama migration backup copies and orphan blobs. Keywords: copias de Ollama, blobs huérfanos, liberar GB.\n"
-          "Read-only, needs no scan. Ollama 0.40+ migrates old models in the background and keeps the original (ggml) "
-          "copy as a backup until it is removed with `ollama rm`; that can be tens of GB. This reads the Ollama models "
-          "folder (models_dir, else OLLAMA_MODELS, else ~/.ollama/models) and lists: migration backups, blobs no "
-          "manifest references (orphans), abandoned partial downloads, orphan metadata and backup-looking folders or "
-          "files, each with size, the model it belonged to and `safe`. An item is safe only when the migrated model's "
-          "manifest and all its blobs exist, every manifest in the store is readable and nothing is recent. Returns "
-          "reclaimable_bytes (safe items only), the reasons for the rest, the models with completeness, and whether "
-          "Ollama is busy (loaded models, a pull in progress).\n"
-          "Sinónimos: copias de seguridad de Ollama, backups de la migración, blobs sobrantes, cuánto puedo liberar de "
-          "Ollama, modelos duplicados tras actualizar.",
+          "Read-only, needs no scan. Lists migration backups (Ollama 0.40+ keeps the original copy until `ollama rm`), "
+          "blobs no manifest references, abandoned partial downloads and backup-looking folders, each with size, "
+          "owning model and `safe`. Safe means the migrated model's manifest and blobs exist, every manifest is "
+          "readable and nothing is recent. Returns reclaimable_bytes (safe items only), reasons for the rest, "
+          "model completeness and whether Ollama is busy.\n"
+          "Sinónimos: copias de seguridad de Ollama, cuánto puedo liberar de Ollama, modelos duplicados tras actualizar.",
           {"models_dir": {"type": "string", "description": "Ollama models folder; default OLLAMA_MODELS or ~/.ollama/models"},
-           "kind": {"type": "string", "enum": ["all"] + list(ob.KINDS), "default": "all"},
-           "safe_only": {"type": "boolean", "default": False},
+           "kind": {"type": "string", "enum": ["all"] + list(ob.KINDS), "default": "all",
+                    "description": "Only this kind of item (backups, orphan blobs, partial downloads...)"},
+           "safe_only": {"type": "boolean", "default": False, "description": "List only items marked safe"},
            "limit": _LIMIT(100, 500)},
           idempotent=True),
     _tool("disk_ollama_free",
           "Free Ollama backups and orphans marked safe. Keywords: liberar copias de Ollama, borrar backups.\n"
-          "Frees ONLY items disk_ollama_backups marks safe, re-detected at call time. dry_run=true by default (changes "
-          "nothing; returns the plan, sizes and anything that blocks it); a real run needs dry_run=false AND confirm=true: "
-          "show the user the list and sizes first. Refuses while Ollama has loaded models, is pulling or creating, a "
-          "download is in progress, or the models folder cannot be verified. Files go to the Recycle Bin (mode='trash', "
-          "default; it frees disk only once emptied) or are deleted for good (mode='permanent'); migration backups are "
-          "removed with `ollama rm <digest>` (the way Ollama documents), which needs the Ollama server running and cannot "
-          "be undone: downgrading below 0.40 would then need a re-pull. Every call is appended to data/ollama-free-audit.jsonl.\n"
-          "Sinónimos: libera lo que sobra de Ollama, borra las copias de la migración, limpia blobs huérfanos de Ollama.",
+          "Frees ONLY items disk_ollama_backups marks safe, re-detected at call time. dry_run=true by default "
+          "(plan only); a real run needs dry_run=false AND confirm=true, after showing the user the list. Refuses "
+          "while Ollama has loaded models, is pulling or creating, or the folder cannot be verified. Every call is "
+          "audited in data/ollama-free-audit.jsonl.\n"
+          "Sinónimos: libera lo que sobra de Ollama, borra las copias de la migración.",
           {"ids": {"type": "array", "items": {"type": "string"}, "maxItems": 500,
                    "description": "Item ids from disk_ollama_backups; omit for every safe item"},
-           "models_dir": {"type": "string"},
-           "dry_run": {"type": "boolean", "default": True},
+           "models_dir": {"type": "string", "description": "Ollama models folder; default as disk_ollama_backups"},
+           "dry_run": {"type": "boolean", "default": True,
+                       "description": "True (default) only returns the plan, sizes and blockers; nothing changes"},
            "confirm": {"type": "boolean", "default": False,
                        "description": "Must be true (with dry_run=false) to delete anything. Say so to the user first."},
-           "mode": {"type": "string", "enum": ["trash", "permanent"], "default": "trash"}},
+           "mode": {"type": "string", "enum": ["trash", "permanent"], "default": "trash",
+                    "description": "'trash' (default): Recycle Bin, frees disk once emptied. 'permanent': deleted for "
+                                   "good. Migration backups are removed with `ollama rm <digest>` (needs the Ollama "
+                                   "server running; cannot be undone, downgrading below 0.40 would need a re-pull)"}},
           read_only=False, destructive=True),
     _tool("disk_zip_plan",
           "Dry-run: plan ZIP parts under a size limit. Keywords: partir en zips, dividir en partes, zip de 990 MB.\n"
-          "Takes a folder and says which files go into part_001.zip, part_002.zip... so that every part stays "
-          "under the limit (upload sites with a per-file cap), the estimated size of each part and the files "
-          "bigger than the limit. Writes nothing. With compression='stored' the sizes are exact; with 'deflated' "
-          "they are upper bounds. Sizes: '990mb' decimal, '990mib' binary, plain bytes. Default excludes: "
+          "Takes a folder and says which files go into part_001.zip, part_002.zip... so every part stays under "
+          "the limit (upload sites with a per-file cap), with estimated part sizes and the files bigger than the "
+          "limit. Writes nothing. 'stored' sizes are exact; 'deflated' are upper bounds. Sizes: '990mb' decimal, "
+          "'990mib' binary, plain bytes. Default excludes: "
           + ", ".join(zipsplit.DEFAULT_EXCLUDE) + " (an explicit exclude list replaces them).\n"
-          "Sinónimos: partir esta carpeta en zips, dividir en partes de 990 MB, comprimir por partes, "
-          "cuántos zips saldrían, zip para subir a una web con límite.",
+          "Sinónimos: partir esta carpeta en zips, cuántos zips saldrían, zip para subir a una web.",
           {"path": {"type": "string", "description": "Absolute folder to split, e.g. D:\\Fotos"},
            "out_dir": {"type": "string", "description": "Output folder to validate and show; default <path>_zips"},
            "limit": {"type": "string", "default": "990mb",
@@ -222,18 +219,12 @@ CATALOG = [
           ["path"], idempotent=True),
     _tool("disk_zip_split",
           "Split a folder into ZIPs under a size limit. Keywords: partir en zips, comprimir por partes, zip de 990 MB.\n"
-          "Creates part_001.zip, part_002.zip... in out_dir (default: <folder>_zips next to the source, never "
-          "inside it) and guarantees every part is <= the limit: the real archive size plus the next file and "
-          "the ZIP headers (ZIP64 included) is checked before adding it, and each closed part is measured. "
-          "Folder structure is kept; manifest.txt lists the contents. Files bigger than the limit: "
-          "too_large='skip' (default), 'fail' (refuse to start), 'split' (the file goes alone into a ZIP cut in raw "
-          "volumes name.zip.001, .002...; open the .001 with 7-Zip or join with `copy /b`) or 'move' (MOVES the "
-          "original into out_dir/too_large/: needs confirm=true). The output folder must be empty or new unless "
-          "overwrite=true, which only replaces parts with the same prefix. Refuses to write into a drive root, "
-          "Windows, Program Files or the profile root. Runs as a job: with wait=true (default) it blocks until it "
-          "ends and returns every part with its real size; with wait=false use disk_zip_status.\n"
-          "Sinónimos: parte esta carpeta en zips, divide en partes de 990 MB, comprímelo por partes, "
-          "hazme zips de 25 MB para el correo, zips para subir a una web.",
+          "Creates part_001.zip, part_002.zip... in out_dir (default <folder>_zips, never inside the source), each "
+          "guaranteed <= limit (checked before adding each file, measured when closed). Keeps folder structure and "
+          "writes manifest.txt. Output folder must be empty or new unless overwrite=true; refuses drive roots, "
+          "Windows, Program Files and the profile root. Runs as a job: wait=true blocks and returns every part, "
+          "wait=false then use disk_zip_status.\n"
+          "Sinónimos: parte esta carpeta en zips, zips de 25 MB para el correo.",
           {"path": {"type": "string", "description": "Absolute folder to split, e.g. D:\\Fotos"},
            "out_dir": {"type": "string", "description": "Output folder; default <path>_zips next to the source"},
            "limit": {"type": "string", "default": "990mb",
@@ -241,12 +232,19 @@ CATALOG = [
            "margin": {"type": "string", "default": "5mb", "description": "Safety margin subtracted from the limit"},
            "prefix": {"type": "string", "default": "part"},
            "sort": {"type": "string", "enum": list(zipsplit.SORT_MODES), "default": "name"},
-           "compression": {"type": "string", "enum": list(zipsplit.COMPRESSIONS), "default": "stored"},
-           "too_large": {"type": "string", "enum": list(zipsplit.TOO_LARGE_MODES), "default": "skip"},
-           "include": {"type": "array", "items": {"type": "string"}},
+           "compression": {"type": "string", "enum": list(zipsplit.COMPRESSIONS), "default": "stored",
+                           "description": "'stored' (no compression, exact sizes) or 'deflated'"},
+           "too_large": {"type": "string", "enum": list(zipsplit.TOO_LARGE_MODES), "default": "skip",
+                         "description": "Files alone bigger than the limit: 'skip' (default), 'fail' (refuse to "
+                                        "start), 'split' (own ZIP cut in raw volumes name.zip.001, .002...; open the "
+                                        ".001 with 7-Zip or join with `copy /b`) or 'move' (MOVES the original to "
+                                        "out_dir/too_large/; needs confirm=true)"},
+           "include": {"type": "array", "items": {"type": "string"},
+                       "description": "Only files matching one of these globs, e.g. ['*.jpg']"},
            "exclude": {"type": "array", "items": {"type": "string"},
                        "description": "Replaces the default excludes (" + ", ".join(zipsplit.DEFAULT_EXCLUDE) + ")"},
-           "overwrite": {"type": "boolean", "default": False},
+           "overwrite": {"type": "boolean", "default": False,
+                         "description": "Replace existing parts with the same prefix (nothing else is touched)"},
            "manifest": {"type": "boolean", "default": True, "description": "Write manifest.txt in the output folder"},
            "confirm": {"type": "boolean", "default": False,
                        "description": "Required for too_large='move' (moves user files) and for a whole drive as source"},
