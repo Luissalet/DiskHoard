@@ -1113,6 +1113,7 @@ function openOllama(from) {
 function closeOllama() {
   ovv('ollsec').style.display = 'none';
   if (O.from === 'main') $('#main').style.display = 'flex'; else $('#start').style.display = 'block';
+  followAgent().catch(() => toast('No se pudieron actualizar los resultados. Vuelve a escanear la carpeta.'));
 }
 ovv('olOpenStart').onclick = () => openOllama('start');
 ovv('olBack').onclick = closeOllama;
@@ -1137,6 +1138,7 @@ function ollSelItems() { return ((O.data && O.data.items) || []).filter(i => O.s
 function ollSelBytes() { return ollSelItems().reduce((a, i) => a + i.bytes, 0); }
 
 function ollRender() {
+  const selectedMode = ollMode();
   const r = O.data, out = ovv('olRes');
   if (!r || r.error) {
     const c = ((r && r.candidates) || []).map(x => `<div><span>${esc(x.path)}</span>
@@ -1191,6 +1193,8 @@ function ollRender() {
     O.sel = e.target.checked ? new Set(items.filter(i => i.safe).map(i => i.id)) : new Set(); ollRender(); };
   if (ovv('olSim')) ovv('olSim').onclick = ollSimulate;
   if (ovv('olFree')) ovv('olFree').onclick = ollConfirm;
+  const modeInput = document.querySelector('input[name=olMode][value="' + selectedMode + '"]');
+  if (modeInput) modeInput.checked = true;
 }
 function ollMode() { const x = document.querySelector('input[name=olMode]:checked'); return x ? x.value : 'trash'; }
 function ollPlanHtml(p) {
@@ -1267,6 +1271,7 @@ async function openZip(from, src) {
 function closeZip() {
   zv('zipsec').style.display = 'none';
   if (Z.from === 'main') $('#main').style.display = 'flex'; else $('#start').style.display = 'block';
+  followAgent().catch(() => toast('No se pudieron actualizar los resultados. Vuelve a escanear la carpeta.'));
 }
 zv('zOpenStart').onclick = () => openZip('start');
 zv('btnZipDir').onclick = () => openZip('main', S.path);
@@ -1393,7 +1398,7 @@ function zRenderDone(r) {
   if (open) open.onclick = () => post('/api/open', {path: r.out_dir});
 }
 
-boot();
+boot().then(followAgent);
 
 /* ================= agente (MCP) =================
    Si Faustus u otro cliente MCP escanea o borra, la interfaz lo sigue:
@@ -1459,5 +1464,6 @@ $('#agent').onclick = () => {
 };
 agentPoll();
 </script>
+<script src="/copilot.js"></script>
 </body>
 </html>

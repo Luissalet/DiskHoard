@@ -21,6 +21,7 @@ from . import ollama_backups
 from . import scanner as scanmod
 from . import zipsplit
 from .hoard_link import family
+from .hoard_link.copilot_stdlib import CopilotRelay
 from .hoard_link.atomic import write_text_atomic
 from .hoard_link.guard import check_request, parse_allowed_hosts
 from .hoard_link.proc import reveal_in_file_manager
@@ -573,6 +574,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self._blocked("GET"):
             return
+        if self.server.copilot.handle(self):
+            return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         p = u.path
@@ -628,6 +631,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self._blocked("POST"):
+            return
+        if self.server.copilot.handle(self):
             return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
@@ -692,6 +697,8 @@ class Handler(BaseHTTPRequestHandler):
             ctype += "; charset=utf-8"
         with open(path, "rb") as fh:
             data = fh.read()
+        if ctype.startswith("text/html"):
+            data = self.server.copilot.inject_html(data)
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -755,6 +762,7 @@ def serve(port=None, open_browser=False):
             raise OSError("No hay puertos libres a partir del %d" % DEFAULT_PORT)
     family.configure("diskhoard", data_dir(), token_file=os.path.join(data_dir(), "mcp-token"))
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv.copilot = CopilotRelay("diskhoard", data_dir(), app_name="DiskHoard")
     srv.daemon_threads = True
     ST.port = srv.server_address[1]
     base = "http://127.0.0.1:%d" % ST.port

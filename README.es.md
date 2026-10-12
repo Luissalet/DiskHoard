@@ -2,6 +2,16 @@
 
 [English](README.md)
 
+## Copilot de Faustus
+
+El botón Faustus abre el panel común en todas las vistas. Recibe el escaneo,
+la carpeta comprobada, los ficheros seleccionados y los valores sin enviar de
+los formularios de escaneo, ZIP y copias de Ollama. Faustus conserva los chats,
+borradores y herramientas; el relay usa sólo la biblioteca estándar y deja
+las credenciales en el servidor. Cada carpeta de datos conserva su identidad
+y cada raíz escaneada su conversación. Al acabar un turno se actualizan los
+resultados y se conservan los formularios abiertos. [Contrato API y contexto](docs/copilot.md).
+
 Analizador y limpiador de disco para Windows. Escanea el árbol que le digas, te enseña
 **cuánto pesa cada carpeta por nivel**, te dice **dónde se concentra el peso de verdad** y
 te deja borrar desde la propia interfaz.

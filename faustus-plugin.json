@@ -68,6 +68,15 @@
       }
     }
   },
+  "x-family": {
+    "copilot": {
+      "provider": "faustus",
+      "contract": "1.0",
+      "panel": "/api/copilot/panel.js",
+      "context": ["scan", "folder", "file", "selection", "zip-draft", "ollama-draft"],
+      "project_tools": {"describe": "disk_status", "resolve": "disk_dir"}
+    }
+  },
   "mcp": {
     "transport": "stdio",
     "command": "{FAUSTUS_PYTHON}",

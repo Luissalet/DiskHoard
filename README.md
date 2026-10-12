@@ -24,6 +24,15 @@ The last completed folder scan is cached in `data/last-scan.pkl.gz` and restored
 
 ![Hotspots](docs/puntos-calientes.jpg)
 
+## Faustus copilot
+
+The Faustus button opens the shared panel on every screen. It receives the current
+scan, verified folder, selected files and unsaved scan/ZIP/backup form values.
+Chats and tools run in Faustus through a standard-library relay; the connection
+token stays on the server. Each data directory keeps its identity and each scanned
+root keeps its own conversation. Turn completion refreshes results and preserves
+open forms. See [the API and context contract](docs/copilot.md).
+
 ## Cleanup
 
 Choose **Move to Recycle Bin**, **Delete permanently** or **Generate script**. The PowerShell script is reviewable and supports `-WhatIf`. A confirmation dialog names every target before deletion. Afterward, rescan just that subtree to see the effect. Permanent deletion is irreversible.
