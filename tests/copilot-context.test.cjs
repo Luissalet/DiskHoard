@@ -80,3 +80,21 @@ test('native scan refresh runs outside forms', async () => {
   await hook.onTurnEnd();
   assert.equal(env.followed, true);
 });
+
+test('selection across folders survives reads and only missing paths are removed', async () => {
+  const {env, els, hook} = fixture();
+  els.start.style.display = 'none';
+  Object.assign(env.S, {root:'C:/fixture', path:'C:/fixture/b'});
+  env.S.sel.set('C:/fixture/a/first.txt', {path:'C:/fixture/a/first.txt'});
+  env.S.sel.set('C:/fixture/b/second.txt', {path:'C:/fixture/b/second.txt'});
+  env.S.sel.set('C:/fixture/a/gone.txt', {path:'C:/fixture/a/gone.txt'});
+  env.get = async (url, {path}) => ({path, entries:[{path:path+'/first.txt', name:'first.txt'},
+    {path:path+'/second.txt', name:'second.txt'}]});
+  const ctx = await hook.context();
+  assert.equal(ctx.active_objects.length, 3);
+  assert.deepEqual(Array.from(ctx.selection.paths), ['C:/fixture/a/first.txt','C:/fixture/b/second.txt']);
+  await hook.reconcileSelection();
+  assert.deepEqual([...env.S.sel.keys()], ['C:/fixture/a/first.txt','C:/fixture/b/second.txt']);
+  await hook.reconcileSelection();
+  assert.equal(env.S.sel.size, 2);
+});

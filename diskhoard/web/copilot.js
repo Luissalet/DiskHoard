@@ -3,7 +3,27 @@ const copilotEditedFields = new Set();
 for (const event of ['input', 'change']) document.addEventListener(event, e => {
   if (e.target.id) copilotEditedFields.add(e.target.id);
 });
+async function copilotSelection(folder) {
+  const folders = new Map();
+  if (folder && folder.path) folders.set(folder.path, folder);
+  const selected = [];
+  for (const item of S.sel.values()) {
+    const split = Math.max(item.path.lastIndexOf('/'), item.path.lastIndexOf('\\'));
+    let parent = item.path.slice(0, split) || '/';
+    if (/^[A-Za-z]:$/.test(parent)) parent += '\\';
+    if (!folders.has(parent)) folders.set(parent, await get('/api/dir', {path: parent}));
+    const listing = folders.get(parent);
+    const current = !listing.error && (listing.entries || []).find(entry => entry.path === item.path);
+    if (current) selected.push({kind: current.dir ? 'folder' : 'file',
+      object_id: current.path, title: current.name, size: current.size});
+  }
+  return selected;
+}
 window.hoardCopilot = {
+  async reconcileSelection() {
+    const valid = new Set((await copilotSelection()).map(item => item.object_id));
+    for (const path of S.sel.keys()) if (!valid.has(path)) S.sel.delete(path);
+  },
   async context() {
     const zip = $('#zipsec').style.display === 'flex';
     const ollama = $('#ollsec').style.display === 'flex';
@@ -15,11 +35,7 @@ window.hoardCopilot = {
       if (!folder.error && folder.path) {
         active.push({kind: 'folder', object_id: folder.path, title: folder.path,
           tool: 'disk_dir', size: folder.size});
-        for (const item of S.sel.values()) {
-          const current = folder.entries.find(entry => entry.path === item.path);
-          if (current) active.push({kind: current.dir ? 'folder' : 'file',
-            object_id: current.path, title: current.name, size: current.size});
-        }
+        active.push(...await copilotSelection(folder));
       }
     }
     let editor;

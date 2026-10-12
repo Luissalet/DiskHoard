@@ -1451,7 +1451,9 @@ async function followAgent() {
     return;
   }
   if ($('#main').style.display === 'flex') {   // misma raiz: algo ha cambiado dentro
-    S.loaded = {}; S.sel.clear(); updateSel();
+    S.loaded = {};
+    if (window.hoardCopilot) await window.hoardCopilot.reconcileSelection();
+    updateSel();
     await go(S.path || S.root, true); warmTabs();
     if (S.tab !== 'explorer') showTab(S.tab);
   }
