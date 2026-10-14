@@ -66,7 +66,7 @@ cosas pequeñas se marca como «resto disperso».
 
 Un catálogo de carpetas conocidas: `node_modules`, entornos virtuales, cachés de
 conda/pip/npm/Gradle/Maven, `target/` de Rust, `Library/` de Unity, intermedios de Unreal,
-modelos de Ollama, Hugging Face y LM Studio, cachés de uv/Bun/Go/Flutter, shaders de la GPU,
+modelos de Ollama, Hugging Face y LM Studio, cachés de agentes de IA (Claude Code, Codex, Cursor…), cachés de uv/Bun/Go/Flutter, shaders de la GPU,
 cachés de Spotify/Adobe/DaVinci, temporales de Windows, papelera, discos de Docker y WSL…
 
 Cada una viene con **qué es, si se puede borrar y cómo se regenera**, clasificada en tres
@@ -85,6 +85,44 @@ Las reglas usan marcadores para no dar falsos positivos: `target/` solo cuenta s
 recuperable para no contar dos veces.
 
 ![Basura detectada](docs/basura.jpg)
+
+### Agentes de programación con IA
+
+Categoría **Agentes de IA** del catálogo, con las rutas reales de Windows:
+
+| Herramienta | Seguro (se regenera) | Revisar (pierdes historial o trabajo) |
+|---|---|---|
+| Claude Code (`~\.claude`) | `cache`, `debug`, `downloads`, `shell-snapshots`, `session-env`, `telemetry`, `usage-data`, `paste-cache`, `image-cache`, `stats-cache.json` | `projects`, `sessions`, `file-history` (conversaciones: sin `--resume`), `plans`, `backups`, `history.jsonl` |
+| Claude Desktop (`%APPDATA%\Claude`, `%LOCALAPPDATA%\claude-cli-nodejs\Cache`) | cachés de Chromium (`Cache`, `Code Cache`, `GPUCache`, `Dawn*Cache`, `GrShaderCache`, `GPUPersistentCache`, `ShaderCache`), `Crashpad`, `logs`, `sentry`, caché de la CLI | `claude-code-sessions`, `local-agent-mode-sessions`, `vm_bundles`, `claude-code-vm` y el `LocalCache` del paquete de la Store (su contenido se clasifica aparte) |
+| Codex (`~\.codex`) | `.tmp`, `tmp`, `cache`, temporales huérfanos `*.tmp-*` | `sessions`, `worktrees` (pueden tener trabajo sin commitear), `generated_images`, `attachments` |
+| Cursor (`%APPDATA%\Cursor`, `~\.cursor`) | las cachés de Chromium más `CachedData`, `CachedExtensionVSIXs`, `CachedProfilesData`; `statsig-cache.json.*.tmp` | `worktrees` (pueden tener trabajo sin commitear), `chats` |
+| VS Code (`%APPDATA%\Code`) | `Cache`, `CachedData`, `CachedExtensionVSIXs`, `CachedProfilesData`, cachés de Chromium, `logs` | |
+
+Lo que **no** se cataloga ni lo borra el agente (la interfaz lo marca «no tocar»): credenciales
+(`.credentials.json`, `auth.json`), `.claude.json`, ajustes y `config.toml`, `skills`, `plugins`, `ide`,
+agentes y comandos, `memories`, `rules`, `automations` y `sqlite` de Codex, `extensions`, `User`, `Backups` y
+`Workspaces` de Cursor, y `Local Storage`, `IndexedDB`, `Session Storage` y los `*.json` de Claude Desktop. Una
+carpeta que contenga alguno de ellos (por ejemplo `~\.claude`) tampoco se borra. Los ficheros sueltos
+(`history.jsonl`, temporales huérfanos) se leen en vivo de esas carpetas, porque el escaneo solo guarda carpetas.
+
+### Borrar: re-comprobación y esperado frente a liberado
+
+Cada borrado (`POST /api/delete`, `disk_delete`) vuelve a medir cada elemento justo antes de tocarlo: bytes,
+número de ficheros y fecha de modificación más reciente del árbol, sin seguir enlaces simbólicos ni junctions.
+La referencia es lo que dijo el escaneo (carpetas) o lo que se le enseñó al usuario (ficheros sueltos: lista de
+basura, listado de carpeta, `disk_find`, `disk_explain`). Si ya no cuadra, **ese elemento no se borra**: vuelve
+en `changed` con las cifras de antes y de ahora y `hint: "rescan"`. Se hace `disk_rescan` (o «Reescanear» en el
+diálogo), se mira el tamaño nuevo y se reintenta. `force=true` se salta la comprobación, solo si el usuario
+insiste. Un elemento sin ninguna referencia (nunca escaneado ni listado) se borra y queda con `verified: false`.
+
+El resultado separa lo esperado de lo liberado:
+
+- `expected_bytes`: lo que decía el escaneo de lo que se ha borrado; `freed_bytes`: lo medido;
+  `difference_bytes`: liberado menos esperado. Por elemento, en `items` (`status`: `deleted`, `partial`,
+  `changed`, `error`).
+- Borrado definitivo: `freed_on_disk_bytes` es lo liberado. Papelera: `moved_to_bin_bytes` es lo movido,
+  `freed_on_disk_bytes` queda en 0 y el espacio del disco solo vuelve al vaciar la papelera. El diálogo del
+  resultado lo dice.
 
 ### Mapa
 
@@ -181,7 +219,7 @@ herramientas que reenvía a la app en marcha (y si no está en marcha, la arranc
 | `disk_find` | buscar ficheros por patrón, tamaño o antigüedad en cualquier carpeta |
 | `disk_explain` | qué es una carpeta o fichero, si se puede borrar y por qué |
 | `disk_script` | genera y guarda el `.ps1` de limpieza (`-WhatIf`) sin tocar nada |
-| `disk_delete` | borra: a la papelera por defecto; definitivo solo con `mode="permanent"` y `confirm=true` |
+| `disk_delete` | borra: a la papelera por defecto; definitivo solo con `mode="permanent"` y `confirm=true`. Re-mide cada elemento antes (`changed` + pista `rescan`; `force=true` para forzar) y devuelve `expected_bytes` frente a `freed_bytes` |
 | `disk_rescan` | vuelve a leer una subcarpeta y empalma los números |
 | `disk_zip_plan` | plan en seco para partir una carpeta en ZIPs de un tamaño máximo: partes, tamaños y ficheros demasiado grandes |
 | `disk_zip_split` | crea los ZIPs (`part_001.zip`…) garantizando el límite; `too_large`: `skip`, `fail`, `split` (volúmenes `.zip.001`) o `move` (con `confirm=true`); espera al final o devuelve un trabajo |

@@ -39,6 +39,29 @@ Choose **Move to Recycle Bin**, **Delete permanently** or **Generate script**. T
 
 The assistant can never delete drive roots, the user profile and main folders, Windows, Program Files, ProgramData or other protected targets. The MCP layer applies the same rules as the UI.
 
+## AI coding agent caches
+
+The junk catalogue has an **Agentes de IA** category for the data Windows AI coding tools leave under the profile. Paths are the real ones; the sizes come from the scan.
+
+| Tool | Safe (regenerates) | Review (you lose history or work) |
+| --- | --- | --- |
+| Claude Code (`~\.claude`) | `cache`, `debug`, `downloads`, `shell-snapshots`, `session-env`, `telemetry`, `usage-data`, `paste-cache`, `image-cache`, `stats-cache.json` | `projects`, `sessions`, `file-history` (conversations; no more `--resume`), `plans`, `backups`, `history.jsonl` |
+| Claude Desktop (`%APPDATA%\Claude`, `%LOCALAPPDATA%\claude-cli-nodejs\Cache`) | Chromium caches (`Cache`, `Code Cache`, `GPUCache`, `Dawn*Cache`, `GrShaderCache`, `GPUPersistentCache`, `ShaderCache`), `Crashpad`, `logs`, `sentry`, the CLI cache | `claude-code-sessions`, `local-agent-mode-sessions`, `vm_bundles`, `claude-code-vm`, and the `LocalCache` of the Store package (its contents are classified separately) |
+| Codex (`~\.codex`) | `.tmp`, `tmp`, `cache`, orphan `*.tmp-*` files | `sessions`, `worktrees` (may hold uncommitted work), `generated_images`, `attachments` |
+| Cursor (`%APPDATA%\Cursor`, `~\.cursor`) | the Chromium caches above plus `CachedData`, `CachedExtensionVSIXs`, `CachedProfilesData`; `statsig-cache.json.*.tmp` | `worktrees` (may hold uncommitted work), `chats` |
+| VS Code (`%APPDATA%\Code`) | `Cache`, `CachedData`, `CachedExtensionVSIXs`, `CachedProfilesData`, Chromium caches, `logs` | |
+
+Never listed and never deleted by the assistant (the UI marks them "no tocar"): credentials (`.credentials.json`, `auth.json`), `.claude.json`, settings and `config.toml`, `skills`, `plugins`, `ide`, agents and commands, Codex `memories`, `rules`, `automations` and `sqlite`, Cursor `extensions`, `User`, `Backups` and `Workspaces`, and Claude Desktop's `Local Storage`, `IndexedDB`, `Session Storage` and `*.json`. A parent folder that contains any of them (for example `~\.claude`) is refused too. Loose files (`history.jsonl`, orphan temporaries) are read live from those folders, because the scan only keeps directories.
+
+## Deleting: re-check, expected vs freed
+
+Every delete (`POST /api/delete`, `disk_delete`) measures each item again right before touching it: bytes, number of files and newest modification time of the tree, without following symlinks or junctions. The reference is what the scan said (folders) or what was listed to the user (loose files: junk list, folder listing, `disk_find`, `disk_explain`). If it no longer matches, **that item is not deleted**: it comes back in `changed` with the old and new numbers and `hint: "rescan"`. Run `disk_rescan` (or "Reescanear" in the dialog), look at the new size and try again. `force=true` skips the check, only when the user insists. An item with no reference at all (never listed or scanned) is deleted and marked `verified: false`.
+
+The result separates what was expected from what was freed:
+
+- `expected_bytes`: what the scan said for the items that were deleted; `freed_bytes`: what was measured; `difference_bytes`: freed minus expected. Per item in `items` (`status`: `deleted`, `partial`, `changed`, `error`).
+- Permanent delete: `freed_on_disk_bytes` equals what was freed. Recycle Bin: `moved_to_bin_bytes` is what moved, `freed_on_disk_bytes` stays 0, and the space on the drive only comes back when the bin is emptied. The result dialog says so.
+
 ## Split into ZIPs
 
 The **Split into ZIPs** panel (the "Partir en ZIPs" tab, the start-screen button, and the buttons on the folder bar and selection bar) turns a folder into `part_001.zip`, `part_002.zip`... where no part exceeds a limit, for upload sites with a per-file cap. It replaces the old Tkinter "Zip splitter".
@@ -72,7 +95,7 @@ HTTP: `GET /api/ollama/backups?dir=`, `GET /api/ollama/audit?limit=`, `POST /api
 | `disk_drives`, `disk_scan`, `disk_status` | Find drives and shortcuts; start or check a scan. |
 | `disk_dir`, `disk_hotspots`, `disk_junk` | Browse folder sizes, non-overlapping hotspots and known cleanup candidates. |
 | `disk_stale`, `disk_top_files`, `disk_types`, `disk_find` | Find old, large or matching files and size by type. |
-| `disk_explain`, `disk_script`, `disk_delete`, `disk_rescan` | Explain a target, prepare a script, delete or refresh a subtree. |
+| `disk_explain`, `disk_script`, `disk_delete`, `disk_rescan` | Explain a target, prepare a script, delete or refresh a subtree. `disk_delete` re-measures each item first (`changed` + `rescan` hint, `force=true` to override) and returns `expected_bytes` vs `freed_bytes`. |
 | `disk_zip_plan`, `disk_zip_split` | Plan (dry run) or create ZIPs of a folder that each stay under a size limit; `too_large` handling `skip`, `fail`, `split` or `move` (needs `confirm=true`). |
 | `disk_zip_status`, `disk_zip_cancel` | Follow or cancel the ZIP job; a cancel leaves no half-written part. |
 | `disk_ollama_backups`, `disk_ollama_free` | List Ollama migration backups and orphan blobs with what is safe to free; free them (dry run by default, `confirm=true` to apply, audit logged). |
