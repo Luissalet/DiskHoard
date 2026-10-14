@@ -60,12 +60,75 @@ class State:
         self.cache = {}
         self.jobs = {}
         self.job_seq = 0
+        self.proposals = {}   # ruta (minusculas) -> lo que se le dijo al usuario: size/files/mtime
         self.port = 0
         self.started = time.time()
 
 
 ST = State()
 AGENT = agentmod.Agent(sys.modules[__name__])
+
+
+# ---------------------------------------------------- lo que se propone borrar
+
+MAX_PROPOSALS = 20000
+
+
+def _pkey(path):
+    return norm_display(path).rstrip("\\/").lower()
+
+
+def note_proposal(path, size, mtime=None, files=1):
+    """Apunta lo que el escaneo (o un listado en vivo) dijo de un fichero que se
+    va a proponer para borrar. Sirve de referencia al re-medir antes de borrar
+    (los ficheros sueltos no estan en el arbol). Un dato con fecha no se
+    machaca con uno sin fecha."""
+    key = _pkey(path)
+    with ST.lock:
+        cur = ST.proposals.get(key)
+        if cur is not None and cur.get("mtime") is not None and mtime is None:
+            return
+        if len(ST.proposals) >= MAX_PROPOSALS and key not in ST.proposals:
+            ST.proposals.pop(next(iter(ST.proposals)))
+        ST.proposals[key] = {"size": int(size), "files": files, "mtime": mtime}
+
+
+def note_proposals(items):
+    """Ficheros de una lista de basura (los directorios ya estan en el arbol)."""
+    for it in items:
+        if it.get("file"):
+            note_proposal(it["path"], it["size"], it.get("mtime"))
+
+
+def _drop_proposals(path):
+    key = _pkey(path)
+    with ST.lock:
+        for k in [k for k in ST.proposals if k == key or k.startswith(key + os.sep)]:
+            del ST.proposals[k]
+
+
+def baseline_for(path, is_dir, expected=None):
+    """(referencia, origen) de lo que se esperaba encontrar en esta ruta.
+
+    Orden: lo que el cliente diga explicitamente, el nodo del escaneo (carpetas)
+    y lo apuntado al proponerla (ficheros). (None, None) si no hay referencia.
+    """
+    if expected:
+        want = _pkey(path)
+        for k, v in expected.items():
+            if isinstance(v, dict) and _pkey(k) == want:
+                return {x: v.get(x) for x in ("size", "files", "mtime")}, "given"
+    sc = ST.scanner
+    if is_dir and sc is not None and sc.done and not sc.error:
+        chain = _find_chain(sc.root, sc.root_display, path)
+        if chain:
+            node = chain[-1]
+            return {"size": node.size, "files": node.nfiles, "mtime": node.mtime}, "scan"
+    with ST.lock:
+        prop = ST.proposals.get(_pkey(path))
+    if prop is not None:
+        return dict(prop), "proposal"
+    return None, None
 
 
 # ------------------------------------------------------------- instantanea
@@ -136,6 +199,7 @@ def _detach(path):
         return 0
     node = chain[-1]
     parent = chain[-2]
+    _drop_proposals(path)
     name = os.path.basename(norm_display(path).rstrip("\\/"))
     if parent.children:
         for k in list(parent.children):
@@ -191,6 +255,7 @@ def api_scan(path):
         if ST.scanner is not None and not ST.scanner.done:
             ST.scanner.cancel()
         ST.cache.clear()
+        ST.proposals.clear()
         sc = scanmod.Scanner(path)
         sc.on_done = _save_snapshot_async
         ST.scanner = sc
@@ -210,6 +275,9 @@ def api_progress():
 
 
 def _tag_for(path, name):
+    prot = junkmod.protected_reason(path)
+    if prot:
+        return junkmod.protected_tag(prot)
     rule = junkmod.match_rule(path, name)
     if rule is None:
         return None
@@ -248,17 +316,28 @@ def api_dir(path):
                 except OSError:
                     continue
                 note = junkmod.FILE_NOTES.get(entry.name)
+                fpath = norm_display(entry.path)
+                prot = junkmod.protected_reason(fpath)
+                frule = None if (note or prot) else junkmod.match_file_rule(fpath, entry.name)
+                if prot:
+                    tag = junkmod.protected_tag(prot)
+                elif note:
+                    tag = {"label": entry.name, "safety": junkmod.DANGER,
+                           "why": note[0], "how": note[1], "cat": "Sistema"}
+                elif frule:
+                    tag = junkmod.file_tag(frule)
+                else:
+                    tag = None
                 entries.append({
-                    "name": entry.name, "path": norm_display(entry.path), "dir": False,
+                    "name": entry.name, "path": fpath, "dir": False,
                     "size": st.st_size, "files": 0, "mtime": st.st_mtime,
-                    "link": False, "err": False,
-                    "tag": ({"label": entry.name, "safety": junkmod.DANGER,
-                             "why": note[0], "how": note[1], "cat": "Sistema"}
-                            if note else None),
+                    "link": False, "err": False, "tag": tag,
                 })
     except OSError as exc:
         pass
     entries.sort(key=lambda e: -e["size"])
+    for e in [e for e in entries if not e["dir"]][:300]:
+        note_proposal(e["path"], e["size"], e["mtime"])
     crumbs = []
     base = norm_display(sc.root_display).rstrip("\\/")
     acc = base
@@ -294,6 +373,7 @@ def api_rescan(path):
     chain = _find_chain(sc.root, sc.root_display, path)
     if chain is None:
         return {"error": "Esa carpeta esta fuera del escaneo actual."}
+    _drop_proposals(path)
     if not os.path.isdir(long_path(path)):
         # ha desaparecido: la quitamos del arbol y listo
         _detach(path)
@@ -342,6 +422,7 @@ def api_junk():
         return {"error": "Sin escaneo"}
     items = _cached("junk", lambda: junkmod.scan_junk(sc.root, sc.root_display))
     real = [i for i in items if not i.get("container")]
+    note_proposals(items)
     return {"items": items, "cats": junkmod.summarize_junk(items),
             "total": sc.root.size,
             "reclaimable": sum(i["size"] for i in real if i["safety"] == junkmod.SAFE),
@@ -366,6 +447,7 @@ def api_topfiles():
         sysfile = note is not None
         if note is None:
             note = junkmod.EXT_NOTES.get(os.path.splitext(name)[1].lower())
+        note_proposal(p, size)
         out.append({"path": norm_display(p), "size": size, "name": name, "sys": sysfile,
                     "why": note[0] if note else "", "how": note[1] if note else ""})
     return {"items": out}
@@ -393,46 +475,111 @@ def api_exts():
 
 # ------------------------------------------------------------------ borrado
 
-def api_delete(paths, mode):
+def _diff_fields(expected, now, is_dir):
+    out = []
+    for key in ("size", "files", "mtime"):
+        if expected.get(key) is None or (key == "files" and not is_dir):
+            continue
+        if key == "mtime":
+            if abs(float(expected[key]) - float(now[key])) > 0.002:
+                out.append(key)
+        elif int(expected[key]) != int(now[key]):
+            out.append(key)
+    return out
+
+
+def api_delete(paths, mode, expected=None, force=False):
+    """Borra en segundo plano. Antes de tocar cada elemento lo vuelve a medir
+    (bytes, ficheros, fecha mas reciente) y lo compara con lo que se propuso;
+    si no cuadra no lo borra: queda en job["changed"] con la pista "rescan".
+    force=True se salta esa comprobacion (solo si el usuario insiste).
+
+    El resultado separa lo esperado (lo que decia el escaneo) de lo liberado
+    (medido): en la papelera el espacio del disco no sube hasta vaciarla."""
     with ST.lock:
         ST.job_seq += 1
         jid = str(ST.job_seq)
         job = {"id": jid, "total": len(paths), "done": 0, "freed": 0,
-               "errors": [], "current": "", "finished": False, "mode": mode}
+               "errors": [], "current": "", "finished": False, "mode": mode,
+               "force": bool(force), "changed": [], "items": [],
+               "expected_bytes": 0, "freed_bytes": 0, "diff_bytes": 0,
+               "freed_on_disk_bytes": 0, "binned_bytes": 0, "skipped_bytes": 0}
         ST.jobs[jid] = job
+    trash = mode == "trash"
 
     def run():
         for p in paths:
             job["current"] = p
+            item = {"path": p, "status": "", "expected_bytes": None, "freed_bytes": 0, "verified": False}
             try:
-                sz = 0
                 is_dir = os.path.isdir(long_path(p))
-                if not is_dir:
-                    try:
-                        sz = os.lstat(long_path(p)).st_size
-                    except OSError:
-                        sz = 0
-                if mode == "trash":
+                base, source = baseline_for(p, is_dir, expected)
+                # con force y borrado definitivo no hace falta medir: delete_permanent ya cuenta los bytes
+                skip_measure = bool(force) and not trash
+                live = None if skip_measure else scanmod.fingerprint(p)
+                if live is None and not skip_measure:
+                    item["status"] = "changed"
+                    job["changed"].append({"path": p, "reason": "missing", "expected": base, "now": None,
+                                           "hint": "rescan"})
+                    if base:
+                        job["skipped_bytes"] += int(base.get("size") or 0)
+                    job["items"].append(item)
+                    job["done"] += 1
+                    continue
+                if base is not None and not force:
+                    item["verified"] = True
+                    if not scanmod.same_fingerprint(base, live, is_dir):
+                        item["status"] = "changed"
+                        job["changed"].append({"path": p, "reason": "changed since the scan",
+                                               "fields": _diff_fields(base, live, is_dir),
+                                               "expected": base, "now": live, "hint": "rescan"})
+                        job["skipped_bytes"] += int(base.get("size") or 0)
+                        job["items"].append(item)
+                        job["done"] += 1
+                        continue
+                if base is not None:
+                    item["expected_bytes"] = int(base.get("size") or 0)
+                elif live is not None:
+                    item["expected_bytes"] = int(live["size"])
+                item["expected_source"] = source or "live"
+                sz = live["size"] if live is not None else 0
+                if trash:
                     ok, err = send_to_trash([p])
                     if not ok:
                         job["errors"].append("%s: %s" % (p, err))
+                        item["status"] = "error"
+                        item["freed_bytes"] = 0
                     else:
-                        if is_dir:
-                            job["freed"] += _detach(p)
-                        else:
-                            _detach_file(p, sz)
-                            job["freed"] += sz
+                        item["status"] = "deleted"
+                        item["freed_bytes"] = sz
+                        job["binned_bytes"] += sz
                 else:
                     freed, nf, errs = delete_permanent(p)
                     job["errors"].extend(errs[:20])
+                    item["freed_bytes"] = freed
+                    job["freed_on_disk_bytes"] += freed
+                    item["status"] = "partial" if os.path.lexists(long_path(p)) else "deleted"
+                    if item["status"] == "partial" and not errs:
+                        job["errors"].append("%s: sigue existiendo" % p)
+                if item["status"] == "deleted":
                     if is_dir:
                         _detach(p)
                     else:
                         _detach_file(p, sz)
-                    job["freed"] += freed
+                elif item["status"] == "partial" and is_dir:
+                    try:
+                        api_rescan(p)  # el arbol refleja lo que queda de verdad
+                    except Exception:  # noqa: BLE001
+                        pass
+                job["freed"] += item["freed_bytes"]
+                job["freed_bytes"] += item["freed_bytes"]
+                job["expected_bytes"] += item["expected_bytes"] or 0
             except Exception as exc:  # noqa: BLE001
                 job["errors"].append("%s: %s" % (p, exc))
+                item["status"] = item["status"] or "error"
+            job["items"].append(item)
             job["done"] += 1
+        job["diff_bytes"] = job["freed_bytes"] - job["expected_bytes"]
         job["current"] = ""
         job["finished"] = True
 
@@ -653,8 +800,9 @@ class Handler(BaseHTTPRequestHandler):
                 ST.scanner.cancel()
             return self._json({"ok": True})
         if p == "/api/delete":
-            return self._json(api_delete(body.get("paths", []),
-                                         body.get("mode", "trash")))
+            return self._json(api_delete(body.get("paths", []), body.get("mode", "trash"),
+                                         expected=body.get("expected") or None,
+                                         force=bool(body.get("force"))))
         if p == "/api/script":
             return self._json(api_script(body.get("paths", [])))
         if p == "/api/open":

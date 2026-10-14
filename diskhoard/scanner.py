@@ -415,3 +415,81 @@ def walk(root: Node, root_path: str):
         if node.children:
             for name, child in node.children.items():
                 stack.append((path + os.sep + name, child))
+
+
+# ------------------------------------------------- huella para re-verificar
+
+def fingerprint(path: str):
+    """Mide en vivo una ruta como lo hace el escaneo: bytes, ficheros y la
+    fecha de modificacion mas reciente de los ficheros del arbol.
+
+    No sigue enlaces simbolicos ni junctions (una carpeta enlazada cuenta como
+    vacia, igual que en el escaneo). Devuelve None si la ruta no existe y
+    {"size", "files", "mtime", "errors"} si existe; errors cuenta las carpetas
+    que no se pudieron leer.
+    """
+    lp = long_path(path)
+    try:
+        st = os.lstat(lp)
+    except OSError:
+        return None
+    import stat as _stat
+    if not _stat.S_ISDIR(st.st_mode):
+        return {"size": st.st_size, "files": 1, "mtime": st.st_mtime, "errors": 0}
+    is_link = _stat.S_ISLNK(st.st_mode)
+    if not is_link and IS_WIN:
+        try:
+            is_link = os.path.isjunction(lp)
+        except AttributeError:
+            pass
+    if is_link:  # el escaneo no entra en enlaces: pesan 0
+        return {"size": 0, "files": 0, "mtime": 0.0, "errors": 0}
+    size = nfiles = errors = 0
+    mtime = 0.0
+    stack = [lp]
+    while stack:
+        cur = stack.pop()
+        try:
+            with os.scandir(cur) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            is_link = entry.is_symlink()
+                            if not is_link and IS_WIN:
+                                try:
+                                    is_link = entry.is_junction()
+                                except (OSError, AttributeError):
+                                    pass
+                            if not is_link:
+                                stack.append(entry.path)
+                            continue
+                        est = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        errors += 1
+                        continue
+                    size += est.st_size
+                    nfiles += 1
+                    if est.st_mtime > mtime:
+                        mtime = est.st_mtime
+        except OSError:
+            errors += 1
+    return {"size": size, "files": nfiles, "mtime": mtime, "errors": errors}
+
+
+def same_fingerprint(expected: dict, now: dict, is_dir: bool = True) -> bool:
+    """True si lo medido ahora coincide con lo que se proponia borrar.
+    Compara solo las claves presentes en expected; en un fichero, el numero
+    de ficheros no cuenta."""
+    if not expected or now is None:
+        return False
+    for key in ("size", "files", "mtime"):
+        if key not in expected or expected[key] is None:
+            continue
+        if key == "files" and not is_dir:
+            continue
+        if key == "mtime":
+            if abs(float(expected[key]) - float(now[key])) > 0.002:
+                return False
+        elif int(expected[key]) != int(now[key]):
+            return False
+    return True

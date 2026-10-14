@@ -90,7 +90,8 @@ CATALOG = [
           "Known junk with safety level: caches, node_modules, temp. Keywords: basura, limpiar, liberar espacio.\n"
           "Every item says what it is, why it is there, how it regenerates and whether it is 'safe' "
           "(regenerates alone), 'review' (heavy but recoverable) or 'danger' (never delete). Totals per "
-          "category and the reclaimable sum come with it. Filter by safety, category or minimum size.",
+          "category and the reclaimable sum come with it. Includes category 'Agentes de IA': caches and history of "
+          "Claude Code, Claude Desktop, Codex, Cursor, VS Code. Filter by safety, category or minimum size.",
           {"safety": {"type": "string", "enum": ["safe", "review", "danger", "all"], "default": "all"},
            "category": {"type": "string", "description": "Exact category name as returned, e.g. 'Compilaciones'"},
            "min_mb": {"type": "number", "minimum": 0, "default": 20},
@@ -142,13 +143,16 @@ CATALOG = [
           ["paths"]),
     _tool("disk_delete",
           "Delete paths: Recycle Bin by default, permanent only with confirm. Keywords: borrar, eliminar, papelera.\n"
-          "Refuses drive roots, the user profile, Windows, Program Files and anything the catalog marks "
-          "'danger'. mode='trash' is reversible; mode='permanent' needs confirm=true and cannot be undone. "
-          "Waits for the job and returns bytes freed and per-path errors. The size map is updated in place.",
+          "Refuses drive roots, the profile, Windows, Program Files, 'danger' items and AI-tool config. Re-measures each "
+          "item (bytes, files, newest mtime) first: if it no longer matches the scan it is NOT deleted and comes back in "
+          "`changed` with hint 'rescan' (force=true skips this, only if the user insists). Returns expected_bytes (scan) "
+          "vs freed_bytes (measured) and the difference; in trash mode disk space frees only when the bin is emptied.",
           {"paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 500},
            "mode": {"type": "string", "enum": ["trash", "permanent"], "default": "trash"},
            "confirm": {"type": "boolean", "default": False,
                        "description": "Must be true for mode='permanent'. Say so to the user first."},
+           "force": {"type": "boolean", "default": False,
+                     "description": "Delete even when an item changed since the scan. Only if the user insists."},
            "timeout_s": {"type": "integer", "minimum": 5, "maximum": 1800, "default": 600}},
           ["paths"], read_only=False, destructive=True),
     _tool("disk_rescan",
@@ -281,7 +285,10 @@ INSTRUCTIONS = (
     "the drive the user asks about, read it (and say how old it is) instead of scanning again; otherwise "
     "disk_scan that drive or folder. Then read disk_hotspots and disk_junk. Quote sizes in GB with one decimal. Before any disk_delete, list "
     "the exact paths and their safety level to the user; use mode='permanent' only when they ask for it "
-    "explicitly. When unsure, hand them a disk_script instead. To split a folder into ZIPs under a size limit "
+    "explicitly. disk_delete re-measures every item first: anything that changed since the scan comes back in `changed` "
+    "and is not deleted (disk_rescan it, show the new size, retry; force=true only if the user insists). Report "
+    "expected_bytes vs freed_bytes, and in trash mode say the space frees only when the bin is emptied. "
+    "When unsure, hand them a disk_script instead. To split a folder into ZIPs under a size limit "
     "(upload sites, e-mail) run disk_zip_plan first, then disk_zip_split; too_large='move' moves the user's "
     "files, so ask before using it. After an Ollama update, disk_ollama_backups lists the backup copies it keeps of "
     "migrated models and orphan blobs; run disk_ollama_free with dry_run first and only free for real (dry_run=false, "
@@ -344,6 +351,9 @@ def refuse_reason(path):
         if rule is None or rule["safety"] != junkmod.SAFE:
             return "inside the Windows folder and not a known safe cache"
     name = os.path.basename(stripped)
+    prot = junkmod.protected_reason(stripped)
+    if prot:
+        return "protected AI-tool data (%s)" % prot
     if os.path.isdir(long_path(p)):
         rule = junkmod.match_rule(stripped, name)
         if rule is not None and rule["safety"] == junkmod.DANGER:
@@ -360,7 +370,7 @@ def refuse_reason(path):
             def unreadable(exc):
                 errors.append(exc)
 
-            for root, dirs, _files in os.walk(long_path(p), onerror=unreadable):
+            for root, dirs, files in os.walk(long_path(p), onerror=unreadable):
                 if errors:
                     return "cannot inspect every descendant before deletion"
                 for child in dirs:
@@ -370,6 +380,17 @@ def refuse_reason(path):
                     child_rule = junkmod.match_rule(norm_display(candidate), child)
                     if child_rule is not None and child_rule["safety"] == junkmod.DANGER:
                         return "contains a protected folder (%s)" % child_rule["label"]
+                    if junkmod.could_be_protected(child):
+                        child_prot = junkmod.protected_reason(norm_display(candidate))
+                        if child_prot:
+                            return "contains protected AI-tool data (%s)" % child_prot
+                # config and credential files sit directly in the tool's home folders
+                if os.path.basename(root).lower() in junkmod.AI_HOME_DIRS:
+                    for fname in files:
+                        if junkmod.could_be_protected(fname) or fname.lower().endswith(".json"):
+                            file_prot = junkmod.protected_reason(norm_display(os.path.join(root, fname)))
+                            if file_prot:
+                                return "contains protected AI-tool data (%s)" % file_prot
             if errors:
                 return "cannot inspect every descendant before deletion"
     elif name in junkmod.FILE_NOTES:
@@ -617,6 +638,7 @@ class Agent:
              "reclaimable": sum(i["size"] for i in real if i["safety"] == junkmod.SAFE),
              "review": sum(i["size"] for i in real if i["safety"] == junkmod.REVIEW)}
         items = []
+        self.srv.note_proposals(j["items"])
         for it in j["items"]:
             if it.get("container"):
                 continue
@@ -625,6 +647,8 @@ class Agent:
             if category and it["cat"] != category:
                 continue
             item = {k: it[k] for k in ("path", "size", "files", "cat", "safety", "label", "why", "how")}
+            if it.get("file"):
+                item["file"] = True
             item["human"] = _fmt(it["size"])
             item["modified"] = _day(it["mtime"])
             items.append(item)
@@ -724,6 +748,8 @@ class Agent:
         hits.sort(reverse=True)
         items = [{"path": p, "name": os.path.basename(p), "size": s, "human": _fmt(s),
                   "modified": _day(m)} for s, m, p in hits[:int(limit)]]
+        for s_, m_, p_ in hits[:int(limit)]:
+            self.srv.note_proposal(p_, s_, m_)
         self._note("disk_find", "%d matches under %s" % (len(hits), base))
         return {"path": base, "matches": len(hits), "shown": len(items), "entries_seen": seen,
                 "truncated": truncated, "total_matched_bytes": sum(h[0] for h in hits), "items": items}
@@ -734,7 +760,12 @@ class Agent:
         name = os.path.basename(stripped)
         exists = os.path.exists(long_path(p))
         out = {"path": p, "exists": exists, "kind": "folder" if os.path.isdir(long_path(p)) else "file"}
-        if out["kind"] == "folder":
+        prot = junkmod.protected_reason(stripped)
+        if prot:
+            tag = junkmod.protected_tag(prot)
+            out.update({"known": True, "label": tag["label"], "category": tag["cat"],
+                        "safety": junkmod.DANGER, "why": tag["why"], "how": tag["how"]})
+        elif out["kind"] == "folder":
             rule = junkmod.match_rule(stripped, name)
             if rule is not None:
                 out.update({"known": True, "label": rule["label"], "category": rule["cat"],
@@ -743,16 +774,22 @@ class Agent:
                 out.update({"known": False, "safety": "unknown",
                             "hint": "Not in the catalog: judge by contents (disk_dir) and age (disk_stale)."})
         else:
+            frule = junkmod.match_file_rule(stripped, name)
             note = junkmod.FILE_NOTES.get(name) or junkmod.EXT_NOTES.get(os.path.splitext(name)[1].lower())
-            if note:
+            if frule is not None:
+                out.update({"known": True, "label": frule["label"], "category": frule["cat"],
+                            "safety": frule["safety"], "why": frule["why"], "how": frule["how"]})
+            elif note:
                 out.update({"known": True, "why": note[0], "how": note[1],
                             "safety": junkmod.DANGER if name in junkmod.FILE_NOTES else junkmod.REVIEW})
             else:
                 out.update({"known": False, "safety": "unknown"})
             if exists:
                 try:
-                    out["size"] = os.lstat(long_path(p)).st_size
+                    lst = os.lstat(long_path(p))
+                    out["size"] = lst.st_size
                     out["human"] = _fmt(out["size"])
+                    self.srv.note_proposal(p, lst.st_size, lst.st_mtime)
                 except OSError:
                     pass
         sc = self.srv.ST.scanner
@@ -782,7 +819,7 @@ class Agent:
         return {"saved_to": fname, "paths": clean, "script": r["script"],
                 "run": "powershell -ExecutionPolicy Bypass -File \"%s\" -WhatIf   (then without -WhatIf)" % fname}
 
-    def t_disk_delete(self, paths, mode="trash", confirm=False, timeout_s=600):
+    def t_disk_delete(self, paths, mode="trash", confirm=False, timeout_s=600, force=False):
         if mode not in ("trash", "permanent"):
             return {"error": "mode must be 'trash' or 'permanent'"}
         if mode == "permanent" and not confirm:
@@ -802,16 +839,38 @@ class Agent:
         if mode == "trash" and not IS_WIN:
             return {"error": "The Recycle Bin is only available on Windows; use mode='permanent' with confirm.",
                     "refused": refused}
-        r = self.srv.api_delete(clean, "trash" if mode == "trash" else "perm")
+        r = self.srv.api_delete(clean, "trash" if mode == "trash" else "perm", force=bool(force))
         job = self.srv.ST.jobs[r["job"]]
         deadline = time.time() + max(5, min(1800, int(timeout_s)))
         while not job["finished"] and time.time() < deadline:
             time.sleep(0.15)
-        summary = "%s %d paths, freed %s" % (mode, len(clean), _fmt(job["freed"]))
-        self._note("disk_delete", summary, {"paths": clean, "mode": mode})
-        out = {"job": r["job"], "finished": job["finished"], "mode": mode, "deleted": clean,
+        deleted = [i["path"] for i in job["items"] if i["status"] in ("deleted", "partial")]
+        changed = job["changed"]
+        summary = "%s %d paths, expected %s, freed %s%s" % (
+            mode, len(deleted), _fmt(job["expected_bytes"]), _fmt(job["freed_bytes"]),
+            ", %d changed (not deleted)" % len(changed) if changed else "")
+        self._note("disk_delete", summary, {"paths": clean, "mode": mode, "force": bool(force)})
+        diff = job["freed_bytes"] - job["expected_bytes"]
+        out = {"job": r["job"], "finished": job["finished"], "mode": mode, "deleted": deleted,
                "freed": job["freed"], "freed_human": _fmt(job["freed"]),
+               "expected_bytes": job["expected_bytes"], "expected_human": _fmt(job["expected_bytes"]),
+               "freed_bytes": job["freed_bytes"],
+               "difference_bytes": diff,
+               "difference_human": ("-" if diff < 0 else "+") + _fmt(abs(diff)),
+               "freed_on_disk_bytes": job["freed_on_disk_bytes"],
+               "freed_on_disk_human": _fmt(job["freed_on_disk_bytes"]),
+               "moved_to_bin_bytes": job["binned_bytes"],
+               "items": job["items"], "changed": changed,
                "errors": job["errors"], "refused": refused}
+        if mode == "trash":
+            out["note"] = ("Items went to the Recycle Bin: the space on the drive is only released when the user "
+                           "empties it. expected = what the scan said; freed = what was measured and moved.")
+        else:
+            out["note"] = "Permanent deletion: freed is measured while deleting and already free on the drive."
+        if changed:
+            out["changed_hint"] = ("%d item(s) were NOT deleted because they differ from the scan (or vanished). "
+                                   "Run disk_rescan on each path, show the user the new size, and call disk_delete "
+                                   "again; pass force=true only if the user insists." % len(changed))
         sc = self.srv.ST.scanner
         if sc is not None and sc.done:
             out["root_size_now"] = sc.root.size
