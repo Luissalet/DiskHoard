@@ -7,17 +7,129 @@ esto solo clasifica.
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 
 SAFE = "safe"        # regenerable, borrar es seguro
 REVIEW = "review"    # pesado y recuperable, pero mira antes
 DANGER = "danger"    # no lo toques
 
+# ---------------------------------------------------------------------------
+# Agentes de programacion con IA (Claude Code, Claude Desktop, Codex, Cursor,
+# VS Code). Las rutas son las reales de Windows. Solo se catalogan caches,
+# temporales y datos que se pueden perder con un impacto claro; todo lo demas
+# (credenciales, ajustes, skills, plugins, memorias, extensiones...) queda
+# fuera del catalogo y ademas esta en AI_PROTECTED: el agente no lo borra.
+# ---------------------------------------------------------------------------
+AI_CAT = "Agentes de IA"
+
+# Caches de Chromium/Electron que comparten las apps de escritorio.
+_CHROMIUM_SAFE = ("Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache",
+                  "GrShaderCache", "GPUPersistentCache", "ShaderCache", "Crashpad", "logs", "sentry")
+_EDITOR_SAFE = _CHROMIUM_SAFE + ("CachedData", "CachedExtensionVSIXs", "CachedProfilesData")
+
+
+def _sfx(base, names):
+    """Sufijos de ruta (minusculas, con \\ delante) para varias carpetas de una base."""
+    return tuple(("\\%s\\%s" % (base, n)).lower() for n in names)
+
+
+def _ai_rule(rid, suffix, safety, label, why, how, **extra):
+    return dict(id=rid, suffix=suffix, cat=AI_CAT, safety=safety, label=label, why=why, how=how, **extra)
+
+
+_AI_RULES = [
+    # ------------------------------------------------------------ Claude Code
+    _ai_rule("ai_claude_code_cache",
+             _sfx(".claude", ("cache", "debug", "downloads", "shell-snapshots", "session-env",
+                              "telemetry", "usage-data", "paste-cache", "image-cache")),
+             SAFE, "Cache y temporales de Claude Code",
+             "Cache, logs de depuracion, descargas, capturas del shell y datos temporales de sesion "
+             "de Claude Code. No contienen tus conversaciones.",
+             "Claude Code las recrea solo. Cierra las sesiones abiertas antes de borrar."),
+    _ai_rule("ai_claude_code_history", _sfx(".claude", ("projects", "sessions", "file-history")),
+             REVIEW, "Conversaciones de Claude Code",
+             "Transcripciones de todas tus sesiones, memoria automatica de cada proyecto e historial de "
+             "ediciones para deshacer. Si lo borras pierdes el historial de conversaciones y no podras "
+             "reanudar sesiones (claude --resume).",
+             "Borra solo lo que ya no quieras reanudar. Cierra Claude Code antes."),
+    _ai_rule("ai_claude_code_plans", _sfx(".claude", ("plans", "backups")),
+             REVIEW, "Planes y copias de Claude Code",
+             "Planes guardados por Claude Code y copias de seguridad de su configuracion. Si los borras "
+             "pierdes esos planes y la posibilidad de restaurar la configuracion anterior.",
+             "Borra solo si la configuracion actual funciona y no necesitas los planes."),
+
+    # --------------------------------------------------------- Claude Desktop
+    _ai_rule("ai_claude_desktop_cache", _sfx("roaming\\claude", _CHROMIUM_SAFE),
+             SAFE, "Cache de Claude Desktop",
+             "Caches de Chromium, shaders, volcados de errores y logs de la app de escritorio de Claude.",
+             "La app los recrea sola al abrirse."),
+    _ai_rule("ai_claude_desktop_sessions",
+             _sfx("roaming\\claude", ("claude-code-sessions", "local-agent-mode-sessions")),
+             REVIEW, "Sesiones de Claude Desktop",
+             "Sesiones de Claude Code y del modo agente de la app de escritorio. Si las borras pierdes "
+             "ese historial de conversaciones.",
+             "Borra solo las que ya no quieras reabrir. Cierra la app antes."),
+    _ai_rule("ai_claude_desktop_vm", _sfx("roaming\\claude", ("vm_bundles", "claude-code-vm")),
+             REVIEW, "Maquina virtual de Claude Desktop",
+             "Imagen de la maquina virtual del modo agente (varios GB). Se vuelve a descargar al usar "
+             "el modo agente, pero una tarea en curso se pierde.",
+             "Cierra la app y borra; se redescarga cuando la necesite."),
+    _ai_rule("ai_claude_cli_cache", ("\\claude-cli-nodejs\\cache",),
+             SAFE, "Cache de Claude CLI",
+             "Cache de la CLI de Claude (node).", "Se regenera sola."),
+    _ai_rule("ai_claude_msix", ("\\packages\\claude_pzs8sxrjxfjjc\\localcache",),
+             REVIEW, "LocalCache de Claude (paquete de la Store)",
+             "Datos locales de la app de Claude instalada como paquete MSIX. Dentro estan las caches de "
+             "Chromium (seguras) y las sesiones (revisar): se clasifican por separado.",
+             "Entra a ver que hay; no borres la carpeta entera a mano.", descend=True),
+
+    # ------------------------------------------------------------------ Codex
+    _ai_rule("ai_codex_temp", _sfx(".codex", (".tmp", "tmp", "cache")),
+             SAFE, "Temporales y cache de Codex",
+             "Ficheros temporales y cache de Codex.", "Codex los recrea solo. Cierralo antes de borrar."),
+    _ai_rule("ai_codex_sessions", _sfx(".codex", ("sessions",)),
+             REVIEW, "Sesiones de Codex",
+             "Historial de tus sesiones de Codex. Si lo borras pierdes el historial y no podras "
+             "reanudarlas.", "Borra solo las que ya no quieras reanudar."),
+    _ai_rule("ai_codex_worktrees", _sfx(".codex", ("worktrees",)),
+             REVIEW, "Worktrees de Codex",
+             "Copias de trabajo git que Codex crea para sus tareas. Pueden tener trabajo sin commitear "
+             "o ramas sin subir: al borrarlas se pierde.",
+             "Mira `git status` en cada una antes; haz commit o descarta a conciencia."),
+    _ai_rule("ai_codex_media", _sfx(".codex", ("generated_images", "attachments")),
+             REVIEW, "Imagenes y adjuntos de Codex",
+             "Imagenes generadas y ficheros adjuntados en tus sesiones de Codex. Si los borras, las "
+             "sesiones que los citan los pierden.", "Guarda fuera lo que quieras conservar."),
+
+    # ----------------------------------------------------------------- Cursor
+    _ai_rule("ai_cursor_cache", _sfx("roaming\\cursor", _EDITOR_SAFE),
+             SAFE, "Cache de Cursor",
+             "Caches de Chromium, extensiones descargadas, shaders, volcados de errores y logs del editor.",
+             "El editor los recrea solo al abrirse."),
+    _ai_rule("ai_cursor_worktrees", _sfx(".cursor", ("worktrees",)),
+             REVIEW, "Worktrees de Cursor",
+             "Copias de trabajo git de los agentes de Cursor. Pueden tener trabajo sin commitear o ramas "
+             "sin subir: al borrarlas se pierde.",
+             "Mira `git status` en cada una antes de borrar."),
+    _ai_rule("ai_cursor_chats", _sfx(".cursor", ("chats",)),
+             REVIEW, "Chats de Cursor",
+             "Historial de conversaciones con el agente de Cursor. Si lo borras pierdes esos chats.",
+             "Borra solo si no necesitas releerlos."),
+
+    # ---------------------------------------------------------------- VS Code
+    _ai_rule("ai_vscode_cache", _sfx("roaming\\code", _EDITOR_SAFE),
+             SAFE, "Cache de VS Code",
+             "Caches de Chromium, codigo compilado, extensiones descargadas, volcados de errores y logs.",
+             "VS Code los recrea solo al abrirse."),
+]
+
 # name: nombre exacto de carpeta (minusculas)
 # suffix: la ruta completa debe terminar asi (minusculas)
 # marker: alguno de estos ficheros/carpetas debe existir en el PADRE
 # self_marker: alguno de estos debe existir DENTRO de la propia carpeta
 RULES = [
+    *_AI_RULES,
     # ---------------------------------------------- dependencias de desarrollo
     dict(id="node_modules", name="node_modules", cat="Dependencias de desarrollo",
          safety=SAFE, label="node_modules",
@@ -342,6 +454,158 @@ EXT_NOTES = {
 }
 
 
+# ------------------------------------------- agentes de IA: lo que NUNCA se borra
+# Sufijos de ruta (minusculas, con \\ delante). No son basura ni se listan como
+# tal: el agente de DiskHoard se niega a borrarlos (ni ellos ni nada dentro) y
+# la interfaz los marca como "no tocar".
+AI_PROTECTED = (
+    # Claude Code
+    ("\\.claude\\skills", "skills de Claude Code"),
+    ("\\.claude\\plugins", "plugins de Claude Code"),
+    ("\\.claude\\ide", "integracion con IDE de Claude Code"),
+    ("\\.claude\\agents", "subagentes de Claude Code"),
+    ("\\.claude\\commands", "comandos de Claude Code"),
+    ("\\.claude\\hooks", "hooks de Claude Code"),
+    ("\\.claude\\.credentials.json", "credenciales de Claude Code"),
+    ("\\.claude.json", "configuracion y cuenta de Claude Code"),
+    ("\\.claude\\settings.json", "ajustes de Claude Code"),
+    ("\\.claude\\settings.local.json", "ajustes de Claude Code"),
+    ("\\.claude\\claude.md", "instrucciones globales de Claude Code"),
+    # Claude Desktop
+    ("\\roaming\\claude\\local storage", "Local Storage de Claude Desktop"),
+    ("\\roaming\\claude\\indexeddb", "IndexedDB de Claude Desktop"),
+    ("\\roaming\\claude\\session storage", "Session Storage de Claude Desktop"),
+    # Codex
+    ("\\.codex\\memories", "memorias de Codex"),
+    ("\\.codex\\rules", "reglas de Codex"),
+    ("\\.codex\\skills", "skills de Codex"),
+    ("\\.codex\\plugins", "plugins de Codex"),
+    ("\\.codex\\automations", "automatizaciones de Codex"),
+    ("\\.codex\\sqlite", "base de datos de Codex"),
+    ("\\.codex\\config.toml", "configuracion de Codex"),
+    ("\\.codex\\auth.json", "credenciales de Codex"),
+    # Cursor
+    ("\\.cursor\\extensions", "extensiones de Cursor"),
+    ("\\.cursor\\mcp.json", "servidores MCP de Cursor"),
+    ("\\.cursor\\rules", "reglas de Cursor"),
+    ("\\roaming\\cursor\\user", "ajustes de usuario de Cursor"),
+    ("\\roaming\\cursor\\backups", "copias de ficheros sin guardar de Cursor"),
+    ("\\roaming\\cursor\\workspaces", "espacios de trabajo de Cursor"),
+    # VS Code
+    ("\\roaming\\code\\user", "ajustes de usuario de VS Code"),
+    ("\\roaming\\code\\backups", "copias de ficheros sin guardar de VS Code"),
+    ("\\roaming\\code\\workspaces", "espacios de trabajo de VS Code"),
+)
+# (carpeta que lo contiene, patron del nombre, etiqueta): ficheros de config sueltos
+AI_PROTECTED_FILES = (
+    ("\\roaming\\claude", "*.json", "configuracion de Claude Desktop"),
+    ("\\roaming\\cursor", "*.json", "configuracion de Cursor"),
+    ("\\roaming\\code", "*.json", "configuracion de VS Code"),
+)
+# Para no hacer el cotejo completo con cada carpeta de un arbol grande.
+_PROTECTED_LEAVES = {sfx.rsplit("\\", 1)[-1] for sfx, _ in AI_PROTECTED}
+AI_HOME_DIRS = {".claude", ".codex", ".cursor", "claude", "cursor", "code"}
+
+
+def norm_path(path):
+    """Ruta en minusculas con \\, sin barra final: lo que comparan las reglas."""
+    return str(path or "").replace("/", "\\").lower().rstrip("\\")
+
+
+def protected_reason(path):
+    """Etiqueta de lo que protege esta ruta (o algo por encima de ella), o None."""
+    n = norm_path(path)
+    probe = n + "\\"
+    for sfx, label in AI_PROTECTED:
+        if (sfx + "\\") in probe:
+            return label
+    parent, _, name = n.rpartition("\\")
+    for psfx, glob, label in AI_PROTECTED_FILES:
+        if parent.endswith(psfx) and fnmatch.fnmatchcase(name, glob):
+            return label
+    return None
+
+
+def protected_tag(label):
+    """Etiqueta de 'no tocar' para la interfaz y disk_explain."""
+    return {"label": label, "safety": DANGER, "cat": AI_CAT,
+            "why": "Credenciales, ajustes o contenido propio de una herramienta de IA (%s): "
+                   "borrarlo rompe la herramienta o pierdes tu cuenta, tus skills o tus datos." % label,
+            "how": "No lo borres. Si la herramienta da problemas, reinstalala o resetea desde ella."}
+
+
+def file_tag(rule):
+    return {"label": rule["label"], "safety": rule["safety"], "why": rule["why"],
+            "how": rule["how"], "cat": rule["cat"]}
+
+
+def could_be_protected(name):
+    """Prefiltro barato por nombre de carpeta antes de protected_reason."""
+    return name.lower() in _PROTECTED_LEAVES
+
+
+# ----------------------------------------------- ficheros sueltos catalogables
+# parent: sufijo de la carpeta que los contiene; glob: patrones del nombre.
+FILE_RULES = [
+    dict(id="ai_claude_code_stats", parent="\\.claude", glob=("stats-cache.json",),
+         cat=AI_CAT, safety=SAFE, label="Estadisticas en cache de Claude Code",
+         why="Cache de estadisticas de uso de Claude Code.", how="Se regenera sola."),
+    dict(id="ai_claude_code_prompts", parent="\\.claude", glob=("history.jsonl",),
+         cat=AI_CAT, safety=REVIEW, label="Historial de prompts de Claude Code",
+         why="Lo que has escrito en Claude Code (flecha arriba, Ctrl+R). Si lo borras pierdes ese "
+             "historial; las conversaciones estan en projects/.",
+         how="Borralo solo si no quieres conservar lo que escribiste."),
+    dict(id="ai_codex_orphans", parent="\\.codex", glob=("*.tmp-*",),
+         cat=AI_CAT, safety=SAFE, label="Temporal huerfano de Codex",
+         why="Ficheros temporales que Codex dejo a medias al escribir su estado global.",
+         how="Borrar sin miedo con Codex cerrado."),
+    dict(id="ai_cursor_statsig", parent="\\.cursor", glob=("statsig-cache.json.*.tmp",),
+         cat=AI_CAT, safety=SAFE, label="Temporal de Cursor",
+         why="Temporales de la cache de estadisticas de Cursor.", how="Borrar sin miedo."),
+]
+_FILE_HOMES = {fr["parent"].rsplit("\\", 1)[-1] for fr in FILE_RULES}
+
+
+def match_file_rule(path, name=None):
+    """Regla de fichero suelto que aplica a esta ruta, o None."""
+    n = norm_path(path)
+    parent, _, low = n.rpartition("\\")
+    for fr in FILE_RULES:
+        if parent.endswith(fr["parent"]) and any(fnmatch.fnmatchcase(low, g) for g in fr["glob"]):
+            return fr
+    return None
+
+
+def agent_file_items(dir_path, min_bytes=64 * 1024):
+    """Ficheros catalogados dentro de una carpeta de agente de IA (~/.claude, ~/.codex...).
+
+    El arbol escaneado solo guarda carpetas, asi que los ficheros se leen en vivo.
+    """
+    from .winfs import long_path, norm_display
+    out = []
+    try:
+        with os.scandir(long_path(dir_path)) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        continue
+                    fr = match_file_rule(norm_display(entry.path), entry.name)
+                    if fr is None:
+                        continue
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if st.st_size < min_bytes:
+                    continue
+                out.append({"path": norm_display(entry.path), "size": st.st_size, "files": 1,
+                            "mtime": st.st_mtime, "rule": fr["id"], "cat": fr["cat"],
+                            "safety": fr["safety"], "label": fr["label"], "why": fr["why"],
+                            "how": fr["how"], "container": False, "file": True})
+    except OSError:
+        pass
+    return out
+
+
 def _norm_names(rule):
     n = rule.get("name")
     if n is None:
@@ -393,7 +657,7 @@ def _self_marker_ok(rule, path):
 def match_rule(path: str, name: str):
     """Devuelve la regla que aplica a esta carpeta, o None."""
     low_name = name.lower()
-    low_path = path.lower().rstrip("\\")
+    low_path = norm_path(path)
     parent = os.path.dirname(path)
 
     for sfx, rule in _SUFFIX_TAILS.get(low_name, ()):
@@ -426,6 +690,10 @@ def scan_junk(root_node, root_path, min_bytes=20 * 1024 * 1024, limit=600):
         rule = None
         if node is not root_node:
             rule = match_rule(path, name)
+        if rule is None:
+            home = (name if node is not root_node else path).replace("/", "\\").rsplit("\\", 1)[-1].lower()
+            if home in _FILE_HOMES:
+                found.extend(agent_file_items(path, min(min_bytes, 64 * 1024)))
         if rule is not None:
             if node.size >= max(min_bytes, rule.get("min", 0)):
                 found.append({
