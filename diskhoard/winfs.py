@@ -172,8 +172,59 @@ def _force_writable(path):
         pass
 
 
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link_stat(st) -> bool:
+    """A symlink, a junction or any other reparse point: a link to somewhere else, never a folder of its own."""
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def is_link(path) -> bool:
+    """True for symlinks AND junctions (os.path.islink says False for a junction; os.walk walks into it)."""
+    try:
+        return _is_link_stat(os.lstat(long_path(path)))
+    except OSError:
+        return False
+
+
+def _remove_link(lp, st):
+    """Remove the link itself. RemoveDirectory on a directory junction or symlink removes the reparse point and leaves the
+    folder it points to untouched; a file symlink goes with unlink."""
+    if stat.S_ISDIR(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x10:   # FILE_ATTRIBUTE_DIRECTORY
+        try:
+            os.rmdir(lp)
+            return
+        except OSError:
+            pass
+    os.unlink(lp)
+
+
+def _unlink_file(fp, errors):
+    try:
+        os.unlink(fp)
+        return True
+    except PermissionError:
+        _force_writable(fp)
+        try:
+            os.unlink(fp)
+            return True
+        except OSError as exc:
+            errors.append("%s: %s" % (norm_display(fp), exc.strerror or exc))
+    except OSError as exc:
+        errors.append("%s: %s" % (norm_display(fp), exc.strerror or exc))
+    return False
+
+
 def delete_permanent(path, progress=None):
-    """Borra un fichero o arbol completo. Devuelve (bytes, ficheros, errores)."""
+    """Borra un fichero o arbol completo. Devuelve (bytes, ficheros, errores).
+
+    Nunca entra en un enlace: un symlink o una junction (de la ruta o de cualquier carpeta de dentro) se borra como
+    enlace y lo que hay al otro lado se queda como estaba. os.walk(followlinks=False) SI entra en las junctions de
+    Windows, y por eso este recorrido es propio: una copia de trabajo con node_modules enlazado al repositorio
+    original vaciaba el original al borrar la copia."""
     freed = 0
     nfiles = 0
     errors = []
@@ -183,53 +234,60 @@ def delete_permanent(path, progress=None):
     except OSError as exc:
         return 0, 0, ["%s: %s" % (norm_display(path), exc.strerror or exc)]
 
-    if not stat.S_ISDIR(st.st_mode):
+    if _is_link_stat(st):
         try:
-            os.unlink(lp)
-        except PermissionError:
-            _force_writable(lp)
-            try:
-                os.unlink(lp)
-            except OSError as exc:
-                return 0, 0, ["%s: %s" % (norm_display(path), exc.strerror or exc)]
+            _remove_link(lp, st)
         except OSError as exc:
             return 0, 0, ["%s: %s" % (norm_display(path), exc.strerror or exc)]
+        return 0, 1, []
+
+    if not stat.S_ISDIR(st.st_mode):
+        if not _unlink_file(lp, errors):
+            return 0, 0, errors
         return st.st_size, 1, []
 
-    for root, dirs, files in os.walk(lp, topdown=False, followlinks=False):
-        for name in files:
-            fp = os.path.join(root, name)
+    # post-order, iterative (node_modules can be deeper than the recursion limit)
+    stack = [(lp, False)]
+    while stack:
+        cur, emptied = stack.pop()
+        if emptied:
             try:
-                sz = os.lstat(fp).st_size
-            except OSError:
-                sz = 0
-            try:
-                os.unlink(fp)
-            except PermissionError:
-                _force_writable(fp)
-                try:
-                    os.unlink(fp)
-                except OSError as exc:
-                    errors.append("%s: %s" % (norm_display(fp), exc.strerror or exc))
-                    continue
+                os.rmdir(cur)
             except OSError as exc:
-                errors.append("%s: %s" % (norm_display(fp), exc.strerror or exc))
+                if cur != lp:
+                    errors.append("%s: %s" % (norm_display(cur), exc.strerror or exc))
+            continue
+        stack.append((cur, True))
+        try:
+            with os.scandir(cur) as it:
+                entries = list(it)
+        except OSError as exc:
+            errors.append("%s: %s" % (norm_display(cur), exc.strerror or exc))
+            continue
+        for e in entries:
+            try:
+                est = e.stat(follow_symlinks=False)
+            except OSError as exc:
+                errors.append("%s: %s" % (norm_display(e.path), exc.strerror or exc))
                 continue
-            freed += sz
-            nfiles += 1
-            if progress and nfiles % 500 == 0:
-                progress(freed, nfiles)
-        for name in dirs:
-            dp = os.path.join(root, name)
-            try:
-                if os.path.islink(dp):
-                    os.unlink(dp)
-                else:
-                    os.rmdir(dp)
-            except OSError as exc:
-                errors.append("%s: %s" % (norm_display(dp), exc.strerror or exc))
+            if _is_link_stat(est):
+                try:
+                    _remove_link(e.path, est)
+                    nfiles += 1
+                except OSError as exc:
+                    errors.append("%s: %s" % (norm_display(e.path), exc.strerror or exc))
+                continue
+            if stat.S_ISDIR(est.st_mode):
+                stack.append((e.path, False))
+                continue
+            if _unlink_file(e.path, errors):
+                freed += est.st_size
+                nfiles += 1
+                if progress and nfiles % 500 == 0:
+                    progress(freed, nfiles)
     try:
-        os.rmdir(lp)
+        if os.path.lexists(lp):
+            os.rmdir(lp)
     except OSError as exc:
         errors.append("%s: %s" % (norm_display(path), exc.strerror or exc))
     if progress:

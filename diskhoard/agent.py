@@ -21,7 +21,7 @@ import time
 from . import junk as junkmod
 from . import ollama_backups as ob
 from . import zipsplit
-from .winfs import IS_WIN, long_path, norm_display
+from .winfs import IS_WIN, is_link, long_path, norm_display
 
 MB = 1024 ** 2
 GB = 1024 ** 3
@@ -364,7 +364,7 @@ def refuse_reason(path):
             return "lives inside a Git repository's metadata"
         # A parent directory can hide protected descendants. Check the tree
         # before handing it to the asynchronous deleter, which removes it whole.
-        if not os.path.islink(long_path(p)):
+        if not is_link(p):
             errors = []
 
             def unreadable(exc):
@@ -373,10 +373,10 @@ def refuse_reason(path):
             for root, dirs, files in os.walk(long_path(p), onerror=unreadable):
                 if errors:
                     return "cannot inspect every descendant before deletion"
+                # never look through a symlink or junction: the deletion removes the link, not what it points to
+                dirs[:] = [d for d in dirs if not is_link(os.path.join(root, d))]
                 for child in dirs:
                     candidate = os.path.join(root, child)
-                    if os.path.islink(candidate):
-                        continue
                     child_rule = junkmod.match_rule(norm_display(candidate), child)
                     if child_rule is not None and child_rule["safety"] == junkmod.DANGER:
                         return "contains a protected folder (%s)" % child_rule["label"]
