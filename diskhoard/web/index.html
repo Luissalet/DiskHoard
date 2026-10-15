@@ -66,6 +66,7 @@ h1 span{color:var(--acc)}
 .chip:hover{border-color:var(--acc);color:var(--acc)}
 .pathrow{display:flex;gap:8px;margin-top:8px}
 .pathrow input{flex:1;font-family:Consolas,monospace}
+.pathrow .pickbtn{white-space:nowrap}
 .note{color:var(--dim);font-size:12px;margin-top:10px;line-height:1.6}
 
 /* ---------- escaneando ---------- */
@@ -483,7 +484,8 @@ button.primary:hover{background:var(--hoard-accent-strong);border-color:var(--ho
 </div></div>
 <script>
 "use strict";
-const T = new URLSearchParams(location.search).get('t') || '';
+const T = new URLSearchParams(location.search).get('t') ||
+  ((document.querySelector('meta[name="dh-token"]') || {}).content) || '';
 const $ = s => document.querySelector(s);
 const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
 
@@ -552,6 +554,32 @@ async function boot() {
 }
 $('#goPath').onclick = () => scan($('#pathin').value.trim());
 $('#pathin').onkeydown = e => { if (e.key === 'Enter') scan($('#pathin').value.trim()); };
+/* Selector de carpetas: el explorador de Windows junto a cada campo de ruta. */
+function addPickers() {
+  $$('.pathrow').forEach(row => {
+    const inp = row.querySelector('input');
+    if (!inp || row.querySelector('.pickbtn')) return;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'pickbtn'; b.textContent = 'Examinar…';
+    b.title = 'Elegir la carpeta con el explorador de Windows';
+    b.onclick = async () => {
+      const label = b.textContent;
+      b.disabled = true; b.textContent = 'Abriendo…';
+      try {
+        const r = await post('/api/pick-folder', {initial: inp.value.trim()});
+        if (r.path) {
+          inp.value = r.path;
+          inp.dispatchEvent(new Event('input', {bubbles: true}));
+          inp.dispatchEvent(new Event('change', {bubbles: true}));
+          if (inp.id === 'pathin') scan(r.path);
+        } else if (r.error) toast(r.error);
+      } finally { b.disabled = false; b.textContent = label; }
+    };
+    inp.after(b);
+  });
+}
+addPickers();
+
 
 /* ================= escaneo ================= */
 let pollTimer = null;

@@ -24,6 +24,13 @@ The last completed folder scan is cached in `data/last-scan.pkl.gz` and restored
 
 ![Hotspots](docs/puntos-calientes.jpg)
 
+## Choosing a folder
+
+Pick a drive or shortcut, or press «Examinar…» next to any path field: it opens the native
+Windows folder dialog (`POST /api/pick-folder`, run in its own `pythonw` process) and the main
+field scans the chosen folder straight away. Opening the app without `?t=` (hub link, bookmark)
+works too: the page gets the token injected after the Host / Origin guard.
+
 ## Faustus copilot
 
 The Faustus button opens the shared panel on every screen. It receives the current

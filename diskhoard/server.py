@@ -791,6 +791,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         p = u.path
+        if p == "/api/pick-folder":
+            return self._json(api_pick_folder(body.get("initial", ""), body.get("title", "")))
         if p == "/api/scan":
             return self._json(api_scan(body.get("path", "")))
         if p == "/api/rescan":
@@ -846,6 +848,10 @@ class Handler(BaseHTTPRequestHandler):
         with open(path, "rb") as fh:
             data = fh.read()
         if ctype.startswith("text/html"):
+            # The page only reaches here after _blocked() (Host / Origin / Fetch Metadata), so a
+            # same-origin tab opened without ?t= (hub link, bookmark, typed URL) still gets the token.
+            data = data.replace(b'<meta charset="utf-8">',
+                                b'<meta charset="utf-8">\n<meta name="dh-token" content="' + TOKEN.encode("ascii") + b'">', 1)
             data = self.server.copilot.inject_html(data)
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -853,6 +859,61 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+
+
+# Native folder picker: the Windows "select folder" dialog, run in its own pythonw process so Tk
+# never shares a thread with the HTTP server. Topmost so it opens over the browser.
+_PICKER_SRC = r"""
+import sys, tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+try:
+    root.attributes("-topmost", True)
+except Exception:
+    pass
+root.update()
+path = filedialog.askdirectory(parent=root, initialdir=sys.argv[2] or None,
+                               title=sys.argv[3], mustexist=True)
+root.destroy()
+with open(sys.argv[1], "w", encoding="utf-8") as fh:
+    fh.write(path or "")
+"""
+_PICK_LOCK = threading.Lock()
+
+
+def api_pick_folder(initial="", title=""):
+    import subprocess
+    import tempfile
+    if not _PICK_LOCK.acquire(blocking=False):
+        return {"error": "Ya hay un selector de carpetas abierto."}
+    out = None
+    try:
+        init = initial if initial and os.path.isdir(initial) else ""
+        fd, out = tempfile.mkstemp(prefix="dh-pick-", suffix=".txt")
+        os.close(fd)
+        exe = sys.executable
+        windowed = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(windowed):
+            exe = windowed
+        try:
+            subprocess.run([exe, "-c", _PICKER_SRC, out, init, title or "Elige una carpeta"],
+                           timeout=900, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            return {"error": "El selector de carpetas se cerro por tiempo."}
+        with open(out, encoding="utf-8") as fh:
+            path = fh.read().strip()
+        if not path:
+            return {"cancelled": True}
+        return {"path": os.path.normpath(path)}
+    finally:
+        if out and os.path.exists(out):
+            try:
+                os.remove(out)
+            except OSError:
+                pass
+        _PICK_LOCK.release()
 
 
 def api_health():

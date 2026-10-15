@@ -31,7 +31,8 @@ explicarte qué es cada carpeta y limpiar por ti, con las mismas reglas de segur
 Doble clic en `DiskHoard.bat`. Se abre el navegador en `127.0.0.1`.
 
 1. Eliges punto de partida: una unidad entera, un atajo (Escritorio, Descargas, AppData…)
-   o una ruta a mano.
+   o una carpeta: «Examinar…» abre el selector de carpetas de Windows y escanea la que
+   elijas (también se puede pegar la ruta). Los campos de ruta de los ZIP tienen el mismo botón.
 2. Escanea.
 3. Navegas por niveles. Cada fila lleva su barra de peso, su tamaño, el porcentaje que se
    lleva de la carpeta actual, cuántos ficheros contiene y cuándo se tocó por última vez.
@@ -299,7 +300,9 @@ cada petición, `DISKHOARD_ALLOWED_HOSTS` abre un nombre de red local a propósi
 - **No se siguen *junctions* ni enlaces simbólicos.** Si se siguen, el mismo contenido se
   cuenta varias veces y los totales mienten.
 - **Servidor local** con `http.server`, escuchando solo en `127.0.0.1` y con un token que
-  se genera una vez y se guarda en `data/mcp-token`: la interfaz lo lleva en la URL y el
+  se genera una vez y se guarda en `data/mcp-token`: la página lo recibe al cargarse
+  (en la URL o, si se abre sin él desde el Hub o un marcador, inyectado en el HTML tras pasar la
+  guardia de Host / Origin) y el
   puente MCP lo lee del fichero. La interfaz entera es un único fichero HTML sin
   dependencias externas.
 - **El puente MCP no sabe de discos.** Habla JSON-RPC por stdin/stdout y reenvía cada
