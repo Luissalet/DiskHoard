@@ -538,3 +538,25 @@ def test_disk_delete_schema_has_force_and_stays_short():
     assert tool["annotations"]["destructiveHint"] is True
     first = tool["description"].split("\n", 1)[0]
     assert len(first) <= 110
+
+
+def test_junk_inside_protected_ai_folders_is_not_listed(tmp_path):
+    """A plugin ships its own .claude\\plans or node_modules: deleting them breaks the plugin."""
+    home = tmp_path / "home"
+    nested = home / ".claude" / "plugins" / "marketplaces" / "someone" / ".claude" / "plans"
+    nested.mkdir(parents=True)
+    (nested / "p.md").write_bytes(b"x" * 4096)
+    nm = home / ".claude" / "plugins" / "tool" / "node_modules"
+    nm.mkdir(parents=True)
+    (nm / "a.js").write_bytes(b"y" * 4096)
+    plans = home / ".claude" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "mine.md").write_bytes(b"z" * 4096)
+    sc = scanmod.Scanner(str(home))
+    sc.start()
+    while not sc.done:
+        time.sleep(0.02)
+    items = junkmod.scan_junk(sc.root, sc.root_display, min_bytes=0)
+    paths = [i["path"].replace("/", "\\").lower() for i in items]
+    assert not any("\\plugins\\" in p for p in paths), paths
+    assert any(p.endswith("\\.claude\\plans") for p in paths), paths

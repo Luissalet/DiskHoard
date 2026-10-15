@@ -688,6 +688,8 @@ def scan_junk(root_node, root_path, min_bytes=20 * 1024 * 1024, limit=600):
     while stack:
         path, node, name = stack.pop()
         rule = None
+        if node is not root_node and could_be_protected(name) and protected_reason(path):
+            continue  # skills, plugins, ajustes de una herramienta de IA: ni ellos ni nada dentro es basura
         if node is not root_node:
             rule = match_rule(path, name)
         if rule is None:
