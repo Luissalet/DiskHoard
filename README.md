@@ -42,7 +42,7 @@ open forms. See [the API and context contract](docs/copilot.md).
 
 ## Cleanup
 
-Choose **Move to Recycle Bin**, **Delete permanently** or **Generate script**. The PowerShell script is reviewable and supports `-WhatIf`. A confirmation dialog names every target before deletion. Afterward, rescan just that subtree to see the effect. Permanent deletion is irreversible.
+Choose **Move to Recycle Bin**, **Delete permanently** or **Generate script**. The PowerShell script is reviewable and supports `-WhatIf`. A confirmation dialog names every target before deletion. Afterward, rescan just that subtree to see the effect. Permanent deletion is irreversible. It never goes through a link: a symlink or junction inside the deleted folder (or passed on its own) is removed as a link and whatever it points to stays untouched.
 
 The assistant can never delete drive roots, the user profile and main folders, Windows, Program Files, ProgramData or other protected targets. The MCP layer applies the same rules as the UI.
 

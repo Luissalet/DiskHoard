@@ -145,7 +145,7 @@ entrar.
 Seleccionas con las casillas y decides:
 
 - **Mover a la papelera** — reversible, vía `SHFileOperation` con `FOF_ALLOWUNDO`.
-- **Borrar definitivamente** — no pasa por la papelera. Rápido e irreversible.
+- **Borrar definitivamente** — no pasa por la papelera. Rápido e irreversible. Nunca entra por un enlace: un enlace simbólico o una junction dentro de lo que se borra (o pasado tal cual) se quita como enlace y su destino queda intacto.
 - **Generar script** — un `.ps1` comentado que revisas y ejecutas tú, con soporte de
   `-WhatIf` para ver qué haría sin tocar nada.
 
