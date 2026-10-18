@@ -1,3 +1,7 @@
+> **Absorbed by [Talos's Hoard](https://github.com/Luissalet/TalosHoard).** All functions and stored data continue in the merged app. This repository is retained as historical source; its Hub entry provides compatibility only and cannot launch a standalone server. Start Talos's Hoard and explicitly enable the modules you need; all default OFF. Existing data stays in its original folders.
+>
+> The documentation below describes the incorporated engine. Use the linked repository for current installation and operation.
+
 # DiskHoard
 
 [Español](README.es.md)

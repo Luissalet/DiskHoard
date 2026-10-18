@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "diskhoard",
-  "name": "DiskHoard",
-  "purpose": "Measures what fills the user's disks, knows which folders are regenerable junk (caches, node_modules, build output, temp files) and can clean them: to the Recycle Bin, permanently with explicit confirmation, or through a reviewable PowerShell script. It also splits a folder into ZIPs that each stay under a size limit (upload sites with a per-file cap), cutting a file bigger than the limit into raw .zip.001 volumes.",
+  "name": "Disk Hoard · Talos",
+  "purpose": "Absorbed by Talos's Hoard. Compatibility identity only; no standalone server. Measures what fills the user's disks, knows which folders are regenerable junk (caches, node_modules, build output, temp files) and can clean them: to the Recycle Bin, permanently with explicit confirmation, or through a reviewable PowerShell script. It also splits a folder into ZIPs that each stay under a size limit (upload sites with a per-file cap), cutting a file bigger than the limit into raw .zip.001 volumes.",
   "capabilities": [
     "disk-usage",
     "scan",
@@ -30,13 +30,13 @@
     "TOKEN_FILE"
   ],
   "defaults": {
-    "APP_URL": "http://127.0.0.1:8817",
-    "TOKEN_FILE": "{DISKHOARD_DIR}/data/mcp-token"
+    "APP_URL": "http://127.0.0.1:5220/disk",
+    "TOKEN_FILE": "{DISKHOARD_DIR}/data/mcp-token",
+    "TALOS_DIR": "{DISKHOARD_DIR}/../Talos's Hoard"
   },
   "app": {
-    "x-url-file": "{DISKHOARD_DIR}/data/url",
-    "url_default": "http://127.0.0.1:8817",
-    "ui_url": "{APP_URL}",
+    "url_default": "http://127.0.0.1:5220/disk",
+    "ui_url": "http://127.0.0.1:5220/",
     "health": {
       "path": "/api/health",
       "expect": {
@@ -51,21 +51,6 @@
         "diskhoard",
         "disk hoard"
       ]
-    },
-    "launch_hint": {
-      "port_argument": "--port",
-      "kind": "process",
-      "executable": "{FAUSTUS_PYTHON}",
-      "argv": [
-        "-m",
-        "diskhoard",
-        "--no-browser"
-      ],
-      "cwd": "{DISKHOARD_DIR}",
-      "readiness": {
-        "url": "{APP_URL}/api/health",
-        "timeout_s": 20
-      }
     }
   },
   "x-family": {
@@ -73,24 +58,39 @@
       "provider": "faustus",
       "contract": "1.0",
       "panel": "/api/copilot/panel.js",
-      "context": ["scan", "folder", "file", "selection", "zip-draft", "ollama-draft"],
-      "project_tools": {"describe": "disk_status", "resolve": "disk_dir"}
+      "context": [
+        "scan",
+        "folder",
+        "file",
+        "selection",
+        "zip-draft",
+        "ollama-draft"
+      ],
+      "project_tools": {
+        "describe": "disk_status",
+        "resolve": "disk_dir"
+      }
+    },
+    "absorbed_by": {
+      "id": "talos",
+      "repository": "https://github.com/Luissalet/TalosHoard",
+      "module": "disk",
+      "standalone": false
     }
   },
   "mcp": {
     "transport": "stdio",
-    "command": "{FAUSTUS_PYTHON}",
+    "command": "{TALOS_DIR}/.venv/Scripts/python.exe",
     "args": [
-      "{DISKHOARD_DIR}/mcp_server.py"
+      "{TALOS_DIR}/mcp_server.py"
     ],
     "env": {
-      "DISKHOARD_URL": "{APP_URL}",
-      "DISKHOARD_TOKEN_FILE": "{TOKEN_FILE}",
-      "DISKHOARD_DATA_DIR": "{DISKHOARD_DIR}/data"
+      "TALOS_URL": "http://127.0.0.1:5220",
+      "TALOS_TOKEN_FILE": "{TALOS_DIR}/data/mcp-token"
     },
     "optional_env": [
-      "DISKHOARD_AUTOSTART"
+      "TALOS_DATA_DIR"
     ]
   },
-  "notes": "Standard library only: any Python 3.9+ runs both the app and the MCP bridge, so Faustus's own interpreter is enough. The bridge starts the app itself when it is not running. The UI opens with a token in the URL; the bridge reads the same token from data/mcp-token. Deleting through the assistant goes to the Recycle Bin unless it says mode='permanent' with confirm=true, and drive roots, the user profile, Windows and anything the catalog marks 'do not touch' are always refused. Zip splitting (disk_zip_plan, disk_zip_split, disk_zip_status, disk_zip_cancel) never changes the source folder unless too_large='move' is used with confirm=true; it refuses to write into drive roots, Windows, Program Files or the profile root, never writes inside the source folder, and leaves no half-written part when cancelled. Ollama backups (disk_ollama_backups is read only; disk_ollama_free defaults to dry_run and needs confirm=true) only ever frees items the detector verified as safe, refuses while Ollama has models loaded or a pull/run is active, removes migration backups with 'ollama rm' and logs every action to data/ollama-free-audit.jsonl."
+  "notes": "Absorbed by Talos's Hoard: https://github.com/Luissalet/TalosHoard. Launch the merged app explicitly; this identity preserves existing family calls and data. Standard library only: any Python 3.9+ runs both the app and the MCP bridge, so Faustus's own interpreter is enough. The bridge starts the app itself when it is not running. The UI opens with a token in the URL; the bridge reads the same token from data/mcp-token. Deleting through the assistant goes to the Recycle Bin unless it says mode='permanent' with confirm=true, and drive roots, the user profile, Windows and anything the catalog marks 'do not touch' are always refused. Zip splitting (disk_zip_plan, disk_zip_split, disk_zip_status, disk_zip_cancel) never changes the source folder unless too_large='move' is used with confirm=true; it refuses to write into drive roots, Windows, Program Files or the profile root, never writes inside the source folder, and leaves no half-written part when cancelled. Ollama backups (disk_ollama_backups is read only; disk_ollama_free defaults to dry_run and needs confirm=true) only ever frees items the detector verified as safe, refuses while Ollama has models loaded or a pull/run is active, removes migration backups with 'ollama rm' and logs every action to data/ollama-free-audit.jsonl."
 }
